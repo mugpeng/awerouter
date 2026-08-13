@@ -1,0 +1,108 @@
+<div align="center">
+  <h1>awerouter: 智能 LLM 路由</h1>
+  <p><strong>轻量任务走 Flash，复杂决策走 Pro。</strong></p>
+  <p>按请求结构信号做确定性路由的 Anthropic 透明代理——不猜语义、不用关键词、不跑分类器。</p>
+  <p>
+    <a href="./README.md">English</a> ·
+    <strong>简体中文</strong>
+  </p>
+  <p>
+    <img src="https://img.shields.io/badge/version-0.1.0-7C3AED?style=flat-square" alt="Version">
+    <img src="https://img.shields.io/badge/python-%E2%89%A53.9-0EA5E9?style=flat-square" alt="Python">
+  </p>
+  <p>
+    <img src="https://img.shields.io/badge/status-alpha-c96a3d?style=flat-square" alt="Status">
+    <img src="https://img.shields.io/badge/install-pip-22C55E?style=flat-square" alt="pip">
+    <img src="https://img.shields.io/badge/platform-terminal-334155?style=flat-square" alt="Platform">
+    <img src="https://img.shields.io/pypi/dm/awerouter?style=flat-square" alt="Downloads">
+    <img src="https://img.shields.io/github/stars/owner/awerouter?style=flat-square" alt="Stars">
+  </p>
+</div>
+
+> 按结构信号把 Claude Code 流量拆分到不同 provider，省钱不降质。
+
+## 安装
+
+```bash
+pip install awerouter
+```
+
+## 快速开始
+
+```bash
+# 1. 初始化配置（生成 ~/.config/awerouter/{providers,routing}.json）
+awerouter config init
+
+# 2. 编辑 providers.json — 通过 ${ENV_VAR} 填入密钥
+# 3. 编辑 routing.json — 把 flash/pro 映射到你的 provider/model
+
+# 4. 启动 daemon
+awerouter serve
+
+# 5. 让 CC 指向它（通过 aweswitch 或直接 export）
+export ANTHROPIC_BASE_URL=http://127.0.0.1:20128
+```
+
+## 配置
+
+`~/.config/awerouter/` 下两个文件（`AWEROUTER_CONFIG_DIR` 环境变量覆盖目录）：
+
+**providers.json** — 端点 + 密钥（`config show` 自动脱敏）：
+
+```json
+{
+  "stepfun":   { "base_url": "https://api.stepfun.com/anthropic", "auth": "${STEPFUN_KEY}",   "auth_header": "authorization" },
+  "anthropic": { "base_url": "https://api.anthropic.com",         "auth": "${ANTHROPIC_KEY}", "auth_header": "x-api-key" }
+}
+```
+
+**routing.json** — 路由策略，不含密钥（可以进 git）：
+
+```json
+{
+  "backgroundModel": "c1/flash",
+  "thinkModel": "c1/think",
+  "longContextThreshold": 32000,
+  "destinations": {
+    "flash": "stepfun,step-3.5-flash",
+    "pro":   "anthropic,claude-opus-5"
+  }
+}
+```
+
+密钥用 `${ENV_VAR}` 引用。缺失的环境变量在启动时报错退出。
+
+> **关于 `auth` 字段：** 该字段的值会原样作为 header 值发送，即 `{auth_header}: {expand(auth)}`。对于 `Authorization: Bearer <token>` 型供应商（stepfun 等），写 `"auth": "Bearer ${TOKEN}"`；对于 `x-api-key` 型供应商（anthropic），写 `"auth": "${TOKEN}"` 并配 `"auth_header": "x-api-key"`。
+
+## 路由逻辑
+
+三层 first-match-wins 管线，逐请求评估：
+
+| 层 | 信号 | 决策 |
+|----|------|------|
+| L1 能力护栏 | body 含 `web_search` 工具 | **pro**（flash 不支持） |
+| L2 档位匹配 | `model == c1/flash` 或 `c1/think` | flash / pro |
+| L3 难度评分 | token 超阈值，或含图片 | **pro**；否则 **flash** |
+
+CC 的 `/model` 选择器设置 tier model id（c1/flash / c1/pro / c1/think）。awerouter 直接读取该字段做路由——不猜语义、不用关键词、不跑分类器。
+
+## 命令
+
+```bash
+awerouter serve [--port 20128] [--host 127.0.0.1]
+awerouter config path | show | edit | init
+awerouter log [--lines 20]
+awerouter stats
+awerouter calibrate
+```
+
+`calibrate` 展示 L3 流量（受阈值影响的层）的 token 分布，并在 p90/p95/p99 处建议 `longContextThreshold` 候选值。跑一段真实流量后执行，再编辑 `routing.json`。
+
+## 开发
+
+```bash
+git clone <repo-url>
+cd awerouter
+pip install -e ".[dev]"
+pytest
+```

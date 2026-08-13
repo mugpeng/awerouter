@@ -1,0 +1,330 @@
+"""awerouter — smart LLM router daemon.
+
+Routes Claude Code requests to flash (cheap/fast) or pro (strong/accurate)
+providers based on structural request signals. Opaque SSE proxy; no request
+body parsing on the response path.
+"""
+
+import asyncio
+import json
+import os
+import time
+
+import aiohttp
+from aiohttp import web
+
+from awerouter.config import expand_value
+from awerouter.logging import append, ensure_log_dir
+from awerouter.router import resolve
+from awerouter.types import RequestLog, ResolveResult
+
+
+# ---------------------------------------------------------------------------
+# Header helpers
+# ---------------------------------------------------------------------------
+
+# Headers we always pass through from the client request.
+_PASS_THROUGH = frozenset({
+    "anthropic-version",
+    "content-type",
+    "x-api-key",
+    "x-request-id",
+    "traceparent",
+    "tracestate",
+})
+
+
+def _filter_headers(headers: dict) -> dict:
+    """Keep only pass-through headers, drop hop-by-hop and auth."""
+    out = {}
+    for k, v in headers.items():
+        if k.lower() in _PASS_THROUGH:
+            out[k] = v
+    return out
+
+
+def _set_auth(headers: dict, provider, env: dict | None = None) -> None:
+    """Replace any incoming auth header with the destination provider's creds."""
+    headers.pop("authorization", None)
+    headers.pop("x-api-key", None)
+    headers[provider.auth_header] = expand_value(provider.auth, env)
+
+
+# ---------------------------------------------------------------------------
+# Upstream proxy (single attempt)
+# ---------------------------------------------------------------------------
+
+
+async def _proxy_request(
+    session: aiohttp.ClientSession,
+    body: dict,
+    dest,
+    providers: dict,
+    headers: dict,
+    path: str,
+    timeout: aiohttp.ClientTimeout,
+) -> aiohttp.ClientResponse:
+    """Fire one upstream request. Raises on network/timeout errors."""
+    provider = providers[dest.provider_name]
+    upstream_url = provider.base_url.rstrip("/") + path
+
+    # Rewrite model to the destination's real model id
+    body["model"] = dest.model
+
+    # Auth
+    _set_auth(headers, provider, os.environ)
+
+    return await session.post(
+        upstream_url,
+        json=body,
+        headers=headers,
+        timeout=timeout,
+        allow_redirects=False,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Request handler
+# ---------------------------------------------------------------------------
+
+
+class _RoutingState:
+    """Mutable routing state shared across the retry loop."""
+
+    def __init__(self, providers: dict, routing, body: dict):
+        self.providers = providers
+        self.routing = routing
+        self.body = body
+        self.inbound_model = body.get("model") or ""
+        self.result = resolve(
+            self.inbound_model if self.inbound_model else None,
+            body,
+            routing.destinations,
+            routing.background_model,
+            routing.think_model,
+            routing.long_context_threshold,
+        )
+        self.attempt = 0
+        self.streaming_started = False
+
+
+async def handle_messages(request: web.Request) -> web.StreamResponse:
+    providers: dict = request.app["providers"]
+    routing = request.app["routing"]
+    session: aiohttp.ClientSession = request.app["session"]
+
+    t0 = time.monotonic()
+    body = await request.json()
+    headers = _filter_headers(dict(request.headers))
+
+    # Timeout: generous for streaming, tight for non-streaming
+    is_stream = body.get("stream", False)
+    timeout = aiohttp.ClientTimeout(
+        connect=10,
+        total=None if is_stream else 120,
+        sock_read=None if is_stream else 120,
+    )
+
+    state = _RoutingState(providers, routing, body)
+
+    while True:
+        dest_key = state.result.destination
+        dest = state.routing.destinations[dest_key]
+        state.attempt += 1
+
+        try:
+            up = await _proxy_request(
+                session, state.body, dest, providers, dict(headers), request.path, timeout
+            )
+        except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+            # Network-level failure
+            if dest_key == "flash" and state.attempt == 1:
+                state.result = _fallback_result(state)
+                continue
+            raise web.HTTPBadGateway(
+                text=json.dumps({"error": {"message": f"upstream error: {exc}"}}),
+                content_type="application/json",
+            )
+
+        # We have a response — decide whether to fallback or stream back
+        status = up.status
+        is_transient = status in (429, 408) or (status >= 500 and status < 600)
+
+        if is_transient and dest_key == "flash" and state.attempt == 1 and not state.streaming_started:
+            up.close()
+            state.result = _fallback_result(state)
+            continue
+
+        # Success path or non-fallbackable error — stream back
+        ms = int((time.monotonic() - t0) * 1000)
+        resp = web.StreamResponse(status=status)
+
+        # Copy upstream content-type, anthropic-version
+        for h in ("content-type", "anthropic-version", "x-request-id"):
+            val = up.headers.get(h)
+            if val:
+                resp.headers[h] = val
+
+        await resp.prepare(request)
+
+        byte_count = 0
+        try:
+            async for chunk in up.content.iter_any():
+                await resp.write(chunk)
+                byte_count += len(chunk)
+                state.streaming_started = True
+        except (aiohttp.ClientError, asyncio.TimeoutError, ConnectionError):
+            # Client disconnect or upstream mid-stream error — log partial
+            status = status if status and status < 400 else (status or 499)
+        finally:
+            try:
+                await resp.write_eof()
+            except Exception:
+                pass
+            up.close()
+
+        # Log (always, even on disconnect — needed for calibration)
+        ensure_log_dir()
+        append(RequestLog(
+            ts=_now_iso(),
+            model_in=state.inbound_model or "<none>",
+            label=state.result.label,
+            destination=dest_key,
+            provider=dest.provider_name,
+            model_out=dest.model,
+            status=status,
+            ms=ms,
+            bytes=byte_count,
+            token_count=state.result.inspect.token_count,
+        ))
+
+        return resp
+
+
+def _fallback_result(state: _RoutingState) -> ResolveResult:
+    """Return a new resolve result for the pro fallback."""
+    pro_dest = state.routing.destinations["pro"]
+    pro_provider = state.providers[pro_dest.provider_name]
+    label = state.result.label + "→fallback"
+    return ResolveResult(
+        destination="pro",
+        provider=pro_provider,
+        model=pro_dest.model,
+        label=label,
+        inspect=state.result.inspect,
+    )
+
+
+async def handle_count_tokens(request: web.Request) -> web.Response:
+    providers: dict = request.app["providers"]
+    routing = request.app["routing"]
+    session: aiohttp.ClientSession = request.app["session"]
+
+    body = await request.json()
+    headers = _filter_headers(dict(request.headers))
+
+    # Resolve destination (same logic as messages)
+    model = body.get("model")
+    result = resolve(
+        model, body,
+        routing.destinations,
+        routing.background_model,
+        routing.think_model,
+        routing.long_context_threshold,
+    )
+    dest = routing.destinations[result.destination]
+    provider = providers[dest.provider_name]
+
+    upstream_url = provider.base_url.rstrip("/") + request.path
+    body["model"] = dest.model
+    _set_auth(headers, provider, os.environ)
+
+    try:
+        async with session.post(
+            upstream_url, json=body, headers=headers,
+            timeout=aiohttp.ClientTimeout(connect=10, total=30),
+        ) as up:
+            data = await up.json()
+            return web.json_response(data, status=up.status)
+    except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+        raise web.HTTPBadGateway(
+            text=json.dumps({"error": {"message": f"upstream error: {exc}"}}),
+            content_type="application/json",
+        )
+
+
+async def handle_models(request: web.Request) -> web.Response:
+    routing: "RoutingConfig" = request.app["routing"]
+    models = [
+        {"id": routing.background_model, "object": "model"},
+        {"id": "c1/pro", "object": "model"},
+        {"id": routing.think_model, "object": "model"},
+    ]
+    return web.json_response({"data": models, "object": "list"})
+
+
+async def handle_root(request: web.Request) -> web.Response:
+    return web.json_response({
+        "name": "awerouter",
+        "version": request.app["version"],
+        "endpoints": [
+            "POST /v1/messages",
+            "POST /v1/messages/count_tokens",
+            "GET /v1/models",
+        ],
+    })
+
+
+# ---------------------------------------------------------------------------
+# App factory
+# ---------------------------------------------------------------------------
+
+
+def _now_iso() -> str:
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).isoformat()
+
+
+def create_app(providers: dict, routing) -> web.Application:
+    app = web.Application()
+    app["providers"] = providers
+    app["routing"] = routing
+    app["version"] = "0.1.0"
+
+    session = aiohttp.ClientSession()
+    app["session"] = session
+
+    app.add_routes([
+        web.get("/", handle_root),
+        web.get("/v1/models", handle_models),
+        web.post("/v1/messages", handle_messages),
+        web.post("/v1/messages/count_tokens", handle_count_tokens),
+    ])
+
+    async def on_cleanup(app):
+        await app["session"].close()
+
+    app.on_cleanup.append(on_cleanup)
+    return app
+
+
+# ---------------------------------------------------------------------------
+# Serve command (called from cli.py)
+# ---------------------------------------------------------------------------
+
+
+async def _serve(host: str, port: int, providers: dict, routing) -> None:
+    app = create_app(providers, routing)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, host=host, port=port)
+    await site.start()
+    print(f"awerouter listening on {host}:{port}")
+    print(f"  flash -> {routing.destinations['flash'].provider_name}/{routing.destinations['flash'].model}")
+    print(f"  pro   -> {routing.destinations['pro'].provider_name}/{routing.destinations['pro'].model}")
+    try:
+        await asyncio.Event().wait()
+    except asyncio.CancelledError:
+        pass
+    finally:
+        await runner.cleanup()

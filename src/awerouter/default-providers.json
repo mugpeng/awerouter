@@ -1,0 +1,12 @@
+{
+  "stepfun": {
+    "base_url": "https://api.stepfun.com/anthropic",
+    "auth": "${STEPFUN_KEY}",
+    "auth_header": "authorization"
+  },
+  "anthropic": {
+    "base_url": "https://api.anthropic.com",
+    "auth": "${ANTHROPIC_KEY}",
+    "auth_header": "x-api-key"
+  }
+}

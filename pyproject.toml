@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "awerouter"
+version = "0.1.0"
+description = "Smart LLM router: fast cheap tasks to flash, hard decisions to pro."
+requires-python = ">=3.9"
+license = { text = "MPL-2.0" }
+dependencies = [
+    "click>=8.1",
+    "aiohttp>=3.9",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-asyncio>=0.23"]
+
+[project.scripts]
+awerouter = "awerouter.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+awerouter = ["py.typed", "default-providers.json", "default-routing.json"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+asyncio_mode = "auto"

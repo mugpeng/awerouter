@@ -1,0 +1,9 @@
+{
+  "backgroundModel": "c1/flash",
+  "thinkModel": "c1/think",
+  "longContextThreshold": 32000,
+  "destinations": {
+    "flash": "stepfun,step-3.5-flash",
+    "pro": "anthropic,claude-opus-5"
+  }
+}
