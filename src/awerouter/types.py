@@ -11,6 +11,8 @@ class Provider:
     name: str
     base_url: str
     auth: str
+    # Auto-detected from base_url at load time (anthropic.com → x-api-key, else authorization).
+    # Explicit override only when the heuristic is wrong.
     auth_header: str = "authorization"
 
 
@@ -22,7 +24,9 @@ class Destination:
 
 
 @dataclass
-class RoutingConfig:
+class RoutingProfile:
+    name: str                       # profile id, e.g. "cc-router-1"
+    agent: str                      # maps to a providers.json group: "claude" / "codex"
     background_model: str
     think_model: str
     long_context_threshold: int

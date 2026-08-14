@@ -8,10 +8,12 @@ from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
 from awerouter.server import create_app
-from awerouter.types import Destination, Provider, RoutingConfig
+from awerouter.types import Destination, Provider, RoutingProfile
 
 
-ROUTING = RoutingConfig(
+ROUTING = RoutingProfile(
+    name="test",
+    agent="claude",
     background_model="c1/flash",
     think_model="c1/think",
     long_context_threshold=32,
@@ -113,6 +115,33 @@ class TestAwerouter:
                     d = await r.json()
                     assert d["model"] == "claude-opus-5"
                     assert captured["x_api_key"] == "pro-key"
+            finally:
+                await up_server.close()
+        run(t())
+
+    def test_flash_auth_bearer_auto_prefixed(self):
+        """Authorization header provider gets 'Bearer ' auto-prefixed."""
+        async def t():
+            captured = {}
+
+            async def up(request):
+                captured["authorization"] = request.headers.get("authorization", "")
+                return web.json_response({"model": "x"})
+
+            up_app = web.Application()
+            up_app.router.add_post("/v1/messages", up)
+            up_server = TestServer(up_app)
+            await up_server.start_server()
+            try:
+                app = create_app(_providers(up_server.port), ROUTING)
+                async with TestClient(TestServer(app)) as c:
+                    await c.post("/v1/messages", json={
+                        "model": "c1/flash",
+                        "messages": [{"content": "hi"}],
+                    })
+                    # flash provider uses ${STEPFUN_KEY}="flash-key", authorization header
+                    # → auto-prefixed to "Bearer flash-key"
+                    assert captured["authorization"] == "Bearer flash-key"
             finally:
                 await up_server.close()
         run(t())

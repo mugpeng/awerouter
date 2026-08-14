@@ -8,7 +8,7 @@ from typing import Optional
 import click
 
 from awerouter import __version__
-from awerouter.types import Destination, Provider, RoutingConfig
+from awerouter.types import Destination, Provider, RoutingProfile
 
 # ---------------------------------------------------------------------------
 # Constants (mirror aweswitch cli.py conventions exactly)
@@ -23,6 +23,15 @@ TEMPLATE_ROUTING = Path(__file__).parent / "default-routing.json"
 
 def die(message: str) -> "SystemExit":
     raise SystemExit(f"awerouter: {message}")
+
+
+def detect_auth_header(base_url: str) -> str:
+    """Auto-detect auth header from base_url.
+
+    anthropic.com endpoints use x-api-key (bare token); everyone else uses
+    Authorization (Bearer prefix added at request time).
+    """
+    return "x-api-key" if "anthropic.com" in base_url else "authorization"
 
 
 # ---------------------------------------------------------------------------
@@ -105,62 +114,98 @@ def _parse_destination(raw: str) -> Destination:
     return Destination(provider_name=provider_name, model=model)
 
 
-def load_providers(path: Optional[Path] = None) -> dict[str, Provider]:
+def load_providers(path: Optional[Path] = None) -> dict[str, dict[str, Provider]]:
+    """Load providers grouped by agent. Returns {agent: {provider_name: Provider}}."""
     path = path or providers_path()
     data = _load_json(path, "providers.json")
-    result: dict[str, Provider] = {}
-    for name, entry in data.items():
-        if not isinstance(entry, dict):
-            die(f"provider '{name}' must be an object")
-        base_url = entry.get("base_url")
-        auth = entry.get("auth")
-        if not base_url or not auth:
-            die(f"provider '{name}' missing base_url or auth")
-        result[name] = Provider(
-            name=name,
-            base_url=base_url,
-            auth=auth,
-            auth_header=entry.get("auth_header", "authorization"),
-        )
+    result: dict[str, dict[str, Provider]] = {}
+    for agent, group in data.items():
+        if not isinstance(group, dict):
+            die(f"agent group '{agent}' must be an object")
+        agent_providers: dict[str, Provider] = {}
+        for name, entry in group.items():
+            if not isinstance(entry, dict):
+                die(f"provider '{agent}.{name}' must be an object")
+            base_url = entry.get("base_url")
+            auth = entry.get("auth")
+            if not base_url or not auth:
+                die(f"provider '{agent}.{name}' missing base_url or auth")
+            auth_header = entry.get("auth_header") or detect_auth_header(base_url)
+            agent_providers[name] = Provider(
+                name=name, base_url=base_url, auth=auth, auth_header=auth_header,
+            )
+        result[agent] = agent_providers
     return result
 
 
-def load_routing(path: Optional[Path] = None) -> RoutingConfig:
+def load_routing(path: Optional[Path] = None) -> dict[str, RoutingProfile]:
+    """Load all routing profiles keyed by profile id."""
     path = path or routing_path()
     data = _load_json(path, "routing.json")
-    required = ["backgroundModel", "thinkModel", "longContextThreshold", "destinations"]
-    for key in required:
-        if key not in data:
-            die(f"routing.json missing required key: {key}")
-    dests = data.get("destinations", {})
-    if not isinstance(dests, dict):
-        die("routing.json destinations must be an object")
-    parsed: dict[str, Destination] = {}
-    for tier, raw in dests.items():
-        if tier not in ("flash", "pro"):
-            die(f"routing.json destination key must be flash or pro, got: {tier}")
-        parsed[tier] = _parse_destination(str(raw))
-    return RoutingConfig(
-        background_model=str(data["backgroundModel"]),
-        think_model=str(data["thinkModel"]),
-        long_context_threshold=int(data["longContextThreshold"]),
-        destinations=parsed,
-    )
+    profiles: dict[str, RoutingProfile] = {}
+    for name, body in data.items():
+        if not isinstance(body, dict):
+            die(f"profile '{name}' must be an object")
+        agent = body.get("agent")
+        if not agent:
+            die(f"profile '{name}' missing required 'agent' field")
+        for key in ("backgroundModel", "thinkModel", "longContextThreshold", "destinations"):
+            if key not in body:
+                die(f"profile '{name}' missing required key: {key}")
+        dests_raw = body["destinations"]
+        if not isinstance(dests_raw, dict):
+            die(f"profile '{name}' destinations must be an object")
+        parsed: dict[str, Destination] = {}
+        for tier, raw in dests_raw.items():
+            if tier not in ("flash", "pro"):
+                die(f"profile '{name}' destination key must be flash or pro, got: {tier}")
+            parsed[tier] = _parse_destination(str(raw))
+        profiles[name] = RoutingProfile(
+            name=name,
+            agent=str(agent),
+            background_model=str(body["backgroundModel"]),
+            think_model=str(body["thinkModel"]),
+            long_context_threshold=int(body["longContextThreshold"]),
+            destinations=parsed,
+        )
+    return profiles
 
 
 def resolve_provider(name: str, providers: dict[str, Provider]) -> Provider:
     if name not in providers:
-        die(f"provider '{name}' referenced in routing.json not found in providers.json")
+        avail = ", ".join(providers) or "(none)"
+        die(f"provider '{name}' not found in this profile's agent group; available: {avail}")
     return providers[name]
 
 
-def load_config() -> tuple[dict[str, Provider], RoutingConfig]:
-    providers = load_providers()
-    routing = load_routing()
-    # Validate destination provider references and attach Provider objects
-    for tier, dest in routing.destinations.items():
-        dest.provider = resolve_provider(dest.provider_name, providers)
-    return providers, routing
+def load_for_profile(name: str) -> tuple[dict[str, Provider], RoutingProfile]:
+    """Resolve one profile: returns (that agent's providers, profile) with dest refs attached."""
+    providers_all = load_providers()
+    profiles = load_routing()
+    if name not in profiles:
+        avail = ", ".join(profiles) or "(none)"
+        die(f"profile '{name}' not found in routing.json; available: {avail}")
+    profile = profiles[name]
+    if profile.agent not in providers_all:
+        avail = ", ".join(providers_all) or "(none)"
+        die(f"agent '{profile.agent}' (for profile '{name}') not found in providers.json; available: {avail}")
+    agent_providers = providers_all[profile.agent]
+    for tier, dest in profile.destinations.items():
+        dest.provider = resolve_provider(dest.provider_name, agent_providers)
+    return agent_providers, profile
+
+
+def load_default_profile() -> tuple[dict[str, Provider], RoutingProfile]:
+    """Auto-select when only one profile exists; prompt otherwise."""
+    profiles = load_routing()
+    if not profiles:
+        die("no profiles in routing.json")
+    if len(profiles) == 1:
+        return load_for_profile(next(iter(profiles)))
+    die(
+        "multiple profiles available, specify one:\n"
+        f"  awerouter serve <name>\navailable: {', '.join(profiles)}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -182,32 +227,34 @@ def init_config() -> None:
 # Config display
 # ---------------------------------------------------------------------------
 
-def format_providers_display(providers: dict[str, Provider]) -> str:
+def format_providers_display(all_providers: dict[str, dict[str, Provider]]) -> str:
     display = {}
-    for name, p in providers.items():
-        entry = {
-            "base_url": p.base_url,
-            "auth_header": p.auth_header,
-        }
-        auth_raw = p.auth
-        if ENV_REF_RE.fullmatch(str(auth_raw)):
-            entry["auth"] = str(auth_raw)
-        else:
-            entry["auth"] = "<set>"
-        display[name] = entry
+    for agent, group in all_providers.items():
+        agent_display = {}
+        for name, p in group.items():
+            entry = {"base_url": p.base_url, "auth_header": p.auth_header}
+            if ENV_REF_RE.fullmatch(str(p.auth)):
+                entry["auth"] = str(p.auth)
+            else:
+                entry["auth"] = "<set>"
+            agent_display[name] = entry
+        display[agent] = agent_display
     return json.dumps(display, indent=2)
 
 
-def format_routing_display(routing: RoutingConfig) -> str:
-    return json.dumps({
-        "backgroundModel": routing.background_model,
-        "thinkModel": routing.think_model,
-        "longContextThreshold": routing.long_context_threshold,
-        "destinations": {
-            k: f"{v.provider_name},{v.model}"
-            for k, v in routing.destinations.items()
-        },
-    }, indent=2)
+def format_routing_display(profiles: dict[str, RoutingProfile]) -> str:
+    display = {}
+    for name, p in profiles.items():
+        display[name] = {
+            "agent": p.agent,
+            "backgroundModel": p.background_model,
+            "thinkModel": p.think_model,
+            "longContextThreshold": p.long_context_threshold,
+            "destinations": {
+                k: f"{v.provider_name},{v.model}" for k, v in p.destinations.items()
+            },
+        }
+    return json.dumps(display, indent=2)
 
 
 # ---------------------------------------------------------------------------

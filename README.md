@@ -36,8 +36,8 @@ awerouter config init
 # 2. Edit providers.json — set your API keys via ${ENV_VAR}
 # 3. Edit routing.json — map flash/pro to your providers/models
 
-# 4. Start the daemon
-awerouter serve
+# 4. Start the daemon (profile name optional when only one exists)
+awerouter serve [cc-router-1]
 
 # 5. Point CC at it (in aweswitch or directly)
 export ANTHROPIC_BASE_URL=http://127.0.0.1:20128
@@ -47,32 +47,42 @@ export ANTHROPIC_BASE_URL=http://127.0.0.1:20128
 
 Two files in `~/.config/awerouter/` (override with `AWEROUTER_CONFIG_DIR`):
 
-**providers.json** — endpoints + keys (redacted in `config show`):
+**providers.json** — endpoints + keys, grouped by agent (redacted in `config show`):
 
 ```json
 {
-  "stepfun":   { "base_url": "https://api.stepfun.com/anthropic", "auth": "${STEPFUN_KEY}",   "auth_header": "authorization" },
-  "anthropic": { "base_url": "https://api.anthropic.com",         "auth": "${ANTHROPIC_KEY}", "auth_header": "x-api-key" }
+  "claude": {
+    "stepfun":   { "base_url": "https://api.stepfun.com/step_plan", "auth": "${STEPFUN_AUTH_TOKEN}" },
+    "anthropic": { "base_url": "https://api.anthropic.com",          "auth": "${ANTHROPIC_KEY}" }
+  },
+  "codex": {
+    "stepfun": { "base_url": "https://api.stepfun.com/v1", "auth": "${STEPFUN_AUTH_TOKEN}" }
+  }
 }
 ```
+
+The auth header is **auto-detected from `base_url`**: `anthropic.com` → `x-api-key` (bare token); everyone else → `Authorization` (auto-prefixes `Bearer `). No `auth_header` field needed unless the heuristic is wrong.
 
 **routing.json** — strategy, no secrets (safe to commit):
 
 ```json
 {
-  "backgroundModel": "c1/flash",
-  "thinkModel": "c1/think",
-  "longContextThreshold": 32000,
-  "destinations": {
-    "flash": "stepfun,step-3.5-flash",
-    "pro":   "anthropic,claude-opus-5"
+  "cc-router-1": {
+    "agent": "claude",
+    "backgroundModel": "c1/flash",
+    "thinkModel": "c1/think",
+    "longContextThreshold": 8000,
+    "destinations": {
+      "flash": "stepfun,step-3.7-flash",
+      "pro":   "anthropic,claude-opus-5"
+    }
   }
 }
 ```
 
 Keys reference `${ENV_VAR}` syntax. Missing env vars die with a clear message at startup.
 
-> **Note on `auth`:** the field is the **literal header value** sent as `{auth_header}: {expand(auth)}`. For `Authorization: Bearer <token>` providers (stepfun, etc.), write `"auth": "Bearer ${TOKEN}"`. For `x-api-key` providers (anthropic), write `"auth": "${TOKEN}"` with `"auth_header": "x-api-key"`.
+> **Profile-based routing:** `routing.json` groups configs under profile ids (like aweswitch). `awerouter serve <profile>` starts one; with a single profile it auto-selects. `agent` maps the profile to a providers.json group.
 
 ## How It Routes
 
@@ -89,7 +99,7 @@ CC's `/model` picker sets the tier model id (c1/flash / c1/pro / c1/think). awer
 ## Commands
 
 ```bash
-awerouter serve [--port 20128] [--host 127.0.0.1]
+awerouter serve [PROFILE] [--port 20128] [--host 127.0.0.1]
 awerouter config path | show | edit | init
 awerouter log [--lines 20]
 awerouter stats

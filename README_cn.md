@@ -36,8 +36,8 @@ awerouter config init
 # 2. 编辑 providers.json — 通过 ${ENV_VAR} 填入密钥
 # 3. 编辑 routing.json — 把 flash/pro 映射到你的 provider/model
 
-# 4. 启动 daemon
-awerouter serve
+# 4. 启动 daemon（只有一个 profile 时名字可省）
+awerouter serve [cc-router-1]
 
 # 5. 让 CC 指向它（通过 aweswitch 或直接 export）
 export ANTHROPIC_BASE_URL=http://127.0.0.1:20128
@@ -47,32 +47,42 @@ export ANTHROPIC_BASE_URL=http://127.0.0.1:20128
 
 `~/.config/awerouter/` 下两个文件（`AWEROUTER_CONFIG_DIR` 环境变量覆盖目录）：
 
-**providers.json** — 端点 + 密钥（`config show` 自动脱敏）：
+**providers.json** — 端点 + 密钥，按 agent 分组（`config show` 自动脱敏）：
 
 ```json
 {
-  "stepfun":   { "base_url": "https://api.stepfun.com/anthropic", "auth": "${STEPFUN_KEY}",   "auth_header": "authorization" },
-  "anthropic": { "base_url": "https://api.anthropic.com",         "auth": "${ANTHROPIC_KEY}", "auth_header": "x-api-key" }
+  "claude": {
+    "stepfun":   { "base_url": "https://api.stepfun.com/step_plan", "auth": "${STEPFUN_AUTH_TOKEN}" },
+    "anthropic": { "base_url": "https://api.anthropic.com",          "auth": "${ANTHROPIC_KEY}" }
+  },
+  "codex": {
+    "stepfun": { "base_url": "https://api.stepfun.com/v1", "auth": "${STEPFUN_AUTH_TOKEN}" }
+  }
 }
 ```
+
+鉴权头**根据 `base_url` 自动判断**：`anthropic.com` → `x-api-key`（裸 token）；其他 → `Authorization`（自动补 `Bearer `）。除非启发式判断错了，否则不需要填 `auth_header`。
 
 **routing.json** — 路由策略，不含密钥（可以进 git）：
 
 ```json
 {
-  "backgroundModel": "c1/flash",
-  "thinkModel": "c1/think",
-  "longContextThreshold": 32000,
-  "destinations": {
-    "flash": "stepfun,step-3.5-flash",
-    "pro":   "anthropic,claude-opus-5"
+  "cc-router-1": {
+    "agent": "claude",
+    "backgroundModel": "c1/flash",
+    "thinkModel": "c1/think",
+    "longContextThreshold": 8000,
+    "destinations": {
+      "flash": "stepfun,step-3.7-flash",
+      "pro":   "anthropic,claude-opus-5"
+    }
   }
 }
 ```
 
 密钥用 `${ENV_VAR}` 引用。缺失的环境变量在启动时报错退出。
 
-> **关于 `auth` 字段：** 该字段的值会原样作为 header 值发送，即 `{auth_header}: {expand(auth)}`。对于 `Authorization: Bearer <token>` 型供应商（stepfun 等），写 `"auth": "Bearer ${TOKEN}"`；对于 `x-api-key` 型供应商（anthropic），写 `"auth": "${TOKEN}"` 并配 `"auth_header": "x-api-key"`。
+> **基于 profile 的路由：** `routing.json` 用 profile id 分组（类似 aweswitch）。`awerouter serve <profile>` 启动其中一个；只有一个 profile 时自动选择。`agent` 字段把 profile 映射到 providers.json 的分组。
 
 ## 路由逻辑
 
@@ -89,7 +99,7 @@ CC 的 `/model` 选择器设置 tier model id（c1/flash / c1/pro / c1/think）�
 ## 命令
 
 ```bash
-awerouter serve [--port 20128] [--host 127.0.0.1]
+awerouter serve [PROFILE] [--port 20128] [--host 127.0.0.1]
 awerouter config path | show | edit | init
 awerouter log [--lines 20]
 awerouter stats

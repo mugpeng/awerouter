@@ -1,9 +1,7 @@
 """Tests for awerouter.config."""
 
 import json
-import os
-import tempfile
-from pathlib import Path
+import shutil
 
 import pytest
 
@@ -12,12 +10,14 @@ from awerouter.config import (
     SECRET_RE,
     _parse_destination,
     config_dir,
+    detect_auth_header,
     die,
     expand_value,
     format_providers_display,
     format_routing_display,
     init_config,
-    load_config,
+    load_default_profile,
+    load_for_profile,
     load_providers,
     load_routing,
     providers_path,
@@ -25,7 +25,25 @@ from awerouter.config import (
     resolve_provider,
     routing_path,
 )
-from awerouter.types import Destination, Provider, RoutingConfig
+from awerouter.types import Destination, Provider, RoutingProfile
+
+
+# ---------------------------------------------------------------------------
+# detect_auth_header
+# ---------------------------------------------------------------------------
+
+class TestDetectAuthHeader:
+    def test_anthropic(self):
+        assert detect_auth_header("https://api.anthropic.com") == "x-api-key"
+
+    def test_anthropic_subpath(self):
+        assert detect_auth_header("https://api.anthropic.com/v1/messages") == "x-api-key"
+
+    def test_stepfun(self):
+        assert detect_auth_header("https://api.stepfun.com/step_plan") == "authorization"
+
+    def test_other(self):
+        assert detect_auth_header("https://open.bigmodel.cn/api/anthropic") == "authorization"
 
 
 # ---------------------------------------------------------------------------
@@ -102,74 +120,179 @@ class TestParseDestination:
 
 
 # ---------------------------------------------------------------------------
-# load_config / init_config (file-based)
+# load_providers / load_routing (file-based, nested by agent / profile)
 # ---------------------------------------------------------------------------
 
-class TestLoadConfig:
-    def test_loads_defaults(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
-        # Copy defaults
-        from awerouter.config import TEMPLATE_PROVIDERS, TEMPLATE_ROUTING
-        import shutil
-        shutil.copy2(TEMPLATE_PROVIDERS, providers_path())
-        shutil.copy2(TEMPLATE_ROUTING, routing_path())
+def _write_config(tmp_path, providers, routing):
+    (tmp_path / "providers.json").write_text(json.dumps(providers))
+    (tmp_path / "routing.json").write_text(json.dumps(routing))
 
-        providers, routing = load_config()
-        assert "stepfun" in providers
-        assert "anthropic" in providers
-        assert routing.background_model == "c1/flash"
-        assert routing.think_model == "c1/think"
-        assert routing.long_context_threshold == 32000
-        assert "flash" in routing.destinations
-        assert "pro" in routing.destinations
 
-    def test_provider_ref_must_exist(self, tmp_path, monkeypatch):
+class TestLoadProviders:
+    def test_nested_by_agent(self, tmp_path, monkeypatch):
         monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
-        (tmp_path / "providers.json").write_text(
-            json.dumps({"anthropic": {"base_url": "https://api.anthropic.com", "auth": "${ANTHROPIC_KEY}"}})
-        )
-        (tmp_path / "routing.json").write_text(
-            json.dumps({
-                "backgroundModel": "c1/flash",
-                "thinkModel": "c1/think",
-                "longContextThreshold": 32000,
-                "destinations": {"flash": "nonexistent,step-3.5-flash", "pro": "anthropic,claude-opus-5"},
-            })
-        )
-        with pytest.raises(SystemExit, match="provider"):
-            load_config()
+        _write_config(tmp_path, {
+            "claude": {"p": {"base_url": "https://api.stepfun.com/step_plan", "auth": "${K}"}},
+            "codex":  {"p": {"base_url": "https://api.stepfun.com/v1",        "auth": "${K}"}},
+        }, {})
+        result = load_providers()
+        assert "claude" in result and "codex" in result
+        assert result["claude"]["p"].auth_header == "authorization"
+        assert result["codex"]["p"].auth_header == "authorization"
 
-    def test_expand_env_refs(self, tmp_path, monkeypatch):
+    def test_anthropic_auto_detects_x_api_key(self, tmp_path, monkeypatch):
         monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
-        monkeypatch.setenv("MY_KEY", "real_key")
-        (tmp_path / "providers.json").write_text(
-            json.dumps({"p": {"base_url": "https://x", "auth": "${MY_KEY}"}})
-        )
-        (tmp_path / "routing.json").write_text(
-            json.dumps({
-                "backgroundModel": "c1/flash",
-                "thinkModel": "c1/think",
-                "longContextThreshold": 32000,
+        _write_config(tmp_path, {
+            "claude": {"anthropic": {"base_url": "https://api.anthropic.com", "auth": "${K}"}},
+        }, {})
+        result = load_providers()
+        assert result["claude"]["anthropic"].auth_header == "x-api-key"
+
+    def test_explicit_auth_header_override(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+        _write_config(tmp_path, {
+            "claude": {"p": {"base_url": "https://x", "auth": "${K}", "auth_header": "x-api-key"}},
+        }, {})
+        result = load_providers()
+        assert result["claude"]["p"].auth_header == "x-api-key"
+
+    def test_missing_field_dies(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+        _write_config(tmp_path, {"claude": {"p": {"base_url": "https://x"}}}, {})
+        with pytest.raises(SystemExit, match="missing"):
+            load_providers()
+
+
+class TestLoadRouting:
+    def test_multiple_profiles(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+        _write_config(tmp_path, {}, {
+            "cc-1": {
+                "agent": "claude", "backgroundModel": "c1/flash", "thinkModel": "c1/think",
+                "longContextThreshold": 8000,
                 "destinations": {"flash": "p,m1", "pro": "p,m2"},
-            })
-        )
-        providers, _ = load_config()
-        # load_providers stores raw ${VAR} refs; expansion happens at use-time
-        assert providers["p"].auth == "${MY_KEY}"
-        # expand_value resolves it
-        from awerouter.config import expand_value
-        assert expand_value(providers["p"].auth, os.environ) == "real_key"
+            },
+            "cx-1": {
+                "agent": "codex", "backgroundModel": "c1/flash", "thinkModel": "c1/think",
+                "longContextThreshold": 8000,
+                "destinations": {"flash": "p,m1", "pro": "p,m2"},
+            },
+        })
+        profiles = load_routing()
+        assert set(profiles) == {"cc-1", "cx-1"}
+        assert profiles["cc-1"].agent == "claude"
+        assert profiles["cx-1"].agent == "codex"
+        assert profiles["cc-1"].name == "cc-1"
 
+    def test_missing_agent_dies(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+        _write_config(tmp_path, {}, {
+            "cc-1": {"backgroundModel": "x", "thinkModel": "y", "longContextThreshold": 1,
+                     "destinations": {"flash": "p,m", "pro": "p,m"}},
+        })
+        with pytest.raises(SystemExit, match="agent"):
+            load_routing()
+
+    def test_missing_key_dies(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+        _write_config(tmp_path, {}, {
+            "cc-1": {"agent": "claude", "thinkModel": "y", "longContextThreshold": 1,
+                     "destinations": {"flash": "p,m", "pro": "p,m"}},
+        })
+        with pytest.raises(SystemExit, match="backgroundModel"):
+            load_routing()
+
+
+# ---------------------------------------------------------------------------
+# load_for_profile / load_default_profile
+# ---------------------------------------------------------------------------
+
+class TestLoadForProfile:
+    def test_resolves_and_attaches_provider(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+        _write_config(tmp_path, {
+            "claude": {"p": {"base_url": "https://x", "auth": "${K}"}},
+        }, {
+            "cc-1": {
+                "agent": "claude", "backgroundModel": "c1/flash", "thinkModel": "c1/think",
+                "longContextThreshold": 8000,
+                "destinations": {"flash": "p,m1", "pro": "p,m2"},
+            },
+        })
+        providers, profile = load_for_profile("cc-1")
+        assert profile.agent == "claude"
+        assert "p" in providers
+        # Destination provider attached
+        assert profile.destinations["flash"].provider is providers["p"]
+
+    def test_unknown_profile_dies(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+        _write_config(tmp_path, {"claude": {}}, {
+            "cc-1": {
+                "agent": "claude", "backgroundModel": "x", "thinkModel": "y",
+                "longContextThreshold": 1, "destinations": {"flash": "p,m", "pro": "p,m"},
+            },
+        })
+        with pytest.raises(SystemExit, match="not found"):
+            load_for_profile("nope")
+
+    def test_dest_provider_missing_dies(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+        _write_config(tmp_path, {
+            "claude": {"p": {"base_url": "https://x", "auth": "${K}"}},
+        }, {
+            "cc-1": {
+                "agent": "claude", "backgroundModel": "x", "thinkModel": "y",
+                "longContextThreshold": 1,
+                "destinations": {"flash": "nonexistent,m", "pro": "p,m"},
+            },
+        })
+        with pytest.raises(SystemExit, match="provider 'nonexistent'"):
+            load_for_profile("cc-1")
+
+    def test_agent_not_in_providers_dies(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+        _write_config(tmp_path, {"claude": {"p": {"base_url": "https://x", "auth": "${K}"}}}, {
+            "cc-1": {
+                "agent": "codex", "backgroundModel": "x", "thinkModel": "y",
+                "longContextThreshold": 1, "destinations": {"flash": "p,m", "pro": "p,m"},
+            },
+        })
+        with pytest.raises(SystemExit, match="agent 'codex'"):
+            load_for_profile("cc-1")
+
+
+class TestLoadDefaultProfile:
+    def test_single_auto_selects(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+        _write_config(tmp_path, {"claude": {"p": {"base_url": "https://x", "auth": "${K}"}}}, {
+            "cc-1": {
+                "agent": "claude", "backgroundModel": "x", "thinkModel": "y",
+                "longContextThreshold": 1, "destinations": {"flash": "p,m", "pro": "p,m"},
+            },
+        })
+        _, profile = load_default_profile()
+        assert profile.name == "cc-1"
+
+    def test_multiple_dies(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+        _write_config(tmp_path, {"claude": {"p": {"base_url": "https://x", "auth": "${K}"}}}, {
+            "cc-1": {"agent": "claude", "backgroundModel": "x", "thinkModel": "y",
+                     "longContextThreshold": 1, "destinations": {"flash": "p,m", "pro": "p,m"}},
+            "cc-2": {"agent": "claude", "backgroundModel": "x", "thinkModel": "y",
+                     "longContextThreshold": 1, "destinations": {"flash": "p,m", "pro": "p,m"}},
+        })
+        with pytest.raises(SystemExit, match="multiple profiles"):
+            load_default_profile()
+
+
+# ---------------------------------------------------------------------------
+# init_config
+# ---------------------------------------------------------------------------
 
 class TestInitConfig:
-    def test_creates_files(self, tmp_path, monkeypatch):
+    def test_already_exists_dies(self, tmp_path, monkeypatch):
         monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
-        from awerouter.config import TEMPLATE_PROVIDERS, TEMPLATE_ROUTING
-        import shutil
-        # init_config reads from the package templates; just verify it copies
-        # We can't easily test without the package installed, so skip content check.
-        # Just verify it doesn't crash when files exist (the die path).
-        # Actually let's test the "already exists" path.
         (tmp_path / "providers.json").write_text("{}")
         (tmp_path / "routing.json").write_text("{}")
         with pytest.raises(SystemExit, match="already exists"):
@@ -181,27 +304,23 @@ class TestInitConfig:
 # ---------------------------------------------------------------------------
 
 class TestFormatDisplay:
-    def test_providers_redacts_env_ref(self):
-        p = Provider(name="stepfun", base_url="https://x", auth="${STEPFUN_KEY}")
-        out = format_providers_display({"stepfun": p})
-        data = json.loads(out)
-        assert data["stepfun"]["auth"] == "${STEPFUN_KEY}"
+    def test_providers_nested_with_masked_auth(self):
+        all_providers = {
+            "claude": {"p": Provider("p", "https://x", "${STEPFUN_KEY}")},
+            "codex":  {"p": Provider("p", "https://x", "literal-secret")},
+        }
+        data = json.loads(format_providers_display(all_providers))
+        assert data["claude"]["p"]["auth"] == "${STEPFUN_KEY}"
+        assert data["codex"]["p"]["auth"] == "<set>"
+        assert data["claude"]["p"]["auth_header"] == "authorization"
 
-    def test_providers_masks_literal(self):
-        p = Provider(name="x", base_url="https://x", auth="literal-secret-value")
-        out = format_providers_display({"x": p})
-        data = json.loads(out)
-        assert data["x"]["auth"] == "<set>"
-
-    def test_routing_display(self):
-        r = RoutingConfig(
-            background_model="c1/flash",
-            think_model="c1/think",
-            long_context_threshold=32000,
-            destinations={
-                "flash": Destination("stepfun", "step-3.5-flash"),
-                "pro": Destination("anthropic", "claude-opus-5"),
-            },
-        )
-        data = json.loads(format_routing_display(r))
-        assert data["destinations"]["flash"] == "stepfun,step-3.5-flash"
+    def test_routing_display_multiple_profiles(self):
+        profiles = {
+            "cc-1": RoutingProfile("cc-1", "claude", "c1/flash", "c1/think", 8000, {
+                "flash": Destination("p", "m1"),
+                "pro": Destination("p", "m2"),
+            }),
+        }
+        data = json.loads(format_routing_display(profiles))
+        assert data["cc-1"]["agent"] == "claude"
+        assert data["cc-1"]["destinations"]["flash"] == "p,m1"

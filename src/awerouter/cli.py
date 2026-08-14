@@ -7,7 +7,11 @@ import asyncio
 
 import click
 
-from awerouter.config import cli as config_cli, load_config
+from awerouter.config import (
+    cli as config_cli,
+    load_default_profile,
+    load_for_profile,
+)
 from awerouter.server import _serve
 
 # Attach config sub-group to the main cli group
@@ -15,11 +19,19 @@ cli = config_cli
 
 
 @cli.command()
+@click.argument("profile", required=False)
 @click.option("--port", default=20128, show_default=True, help="Listen port.")
 @click.option("--host", default="127.0.0.1", show_default=True, help="Bind address.")
-def serve(port: int, host: str):
-    """Start the awerouter daemon."""
-    providers, routing = load_config()
+def serve(profile: str | None, port: int, host: str):
+    """Start the awerouter daemon for PROFILE.
+
+    PROFILE is a profile id from routing.json. If omitted, auto-selects when only
+    one profile exists.
+    """
+    if profile:
+        providers, routing = load_for_profile(profile)
+    else:
+        providers, routing = load_default_profile()
     try:
         asyncio.run(_serve(host, port, providers, routing))
     except KeyboardInterrupt:

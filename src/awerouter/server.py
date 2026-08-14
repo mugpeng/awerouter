@@ -44,10 +44,16 @@ def _filter_headers(headers: dict) -> dict:
 
 
 def _set_auth(headers: dict, provider, env: dict | None = None) -> None:
-    """Replace any incoming auth header with the destination provider's creds."""
+    """Replace any incoming auth header with the destination provider's creds.
+
+    Authorization header auto-prefixes 'Bearer ' if the value lacks it.
+    """
     headers.pop("authorization", None)
     headers.pop("x-api-key", None)
-    headers[provider.auth_header] = expand_value(provider.auth, env)
+    auth_value = expand_value(provider.auth, env)
+    if provider.auth_header == "authorization" and not auth_value.lower().startswith("bearer "):
+        auth_value = f"Bearer {auth_value}"
+    headers[provider.auth_header] = auth_value
 
 
 # ---------------------------------------------------------------------------
@@ -254,7 +260,7 @@ async def handle_count_tokens(request: web.Request) -> web.Response:
 
 
 async def handle_models(request: web.Request) -> web.Response:
-    routing: "RoutingConfig" = request.app["routing"]
+    routing: "RoutingProfile" = request.app["routing"]
     models = [
         {"id": routing.background_model, "object": "model"},
         {"id": "c1/pro", "object": "model"},
@@ -319,9 +325,10 @@ async def _serve(host: str, port: int, providers: dict, routing) -> None:
     await runner.setup()
     site = web.TCPSite(runner, host=host, port=port)
     await site.start()
-    print(f"awerouter listening on {host}:{port}")
-    print(f"  flash -> {routing.destinations['flash'].provider_name}/{routing.destinations['flash'].model}")
-    print(f"  pro   -> {routing.destinations['pro'].provider_name}/{routing.destinations['pro'].model}")
+    print(f"awerouter listening on {host}:{port}  [{routing.name}]")
+    print(f"  agent  -> {routing.agent}")
+    print(f"  flash  -> {routing.destinations['flash'].provider_name}/{routing.destinations['flash'].model}")
+    print(f"  pro    -> {routing.destinations['pro'].provider_name}/{routing.destinations['pro'].model}")
     try:
         await asyncio.Event().wait()
     except asyncio.CancelledError:

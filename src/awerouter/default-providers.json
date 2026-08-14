@@ -1,12 +1,9 @@
 {
-  "stepfun": {
-    "base_url": "https://api.stepfun.com/anthropic",
-    "auth": "${STEPFUN_KEY}",
-    "auth_header": "authorization"
+  "claude": {
+    "stepfun":   { "base_url": "https://api.stepfun.com/step_plan", "auth": "${STEPFUN_AUTH_TOKEN}" },
+    "anthropic": { "base_url": "https://api.anthropic.com",          "auth": "${ANTHROPIC_KEY}" }
   },
-  "anthropic": {
-    "base_url": "https://api.anthropic.com",
-    "auth": "${ANTHROPIC_KEY}",
-    "auth_header": "x-api-key"
+  "codex": {
+    "stepfun": { "base_url": "https://api.stepfun.com/v1", "auth": "${STEPFUN_AUTH_TOKEN}" }
   }
 }
