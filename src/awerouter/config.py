@@ -150,6 +150,7 @@ def load_routing(path: Optional[Path] = None) -> tuple[Settings, dict[str, Routi
     settings = Settings(
         background_model=str(raw_settings.get("backgroundModel", "flash")),
         think_model=str(raw_settings.get("thinkModel", "pro")),
+        web_search_model=str(raw_settings.get("webSearchModel", "pro")),
     )
 
     profiles: dict[str, RoutingProfile] = {}
@@ -255,6 +256,7 @@ def format_routing_display(settings: Settings, profiles: dict[str, RoutingProfil
         "settings": {
             "backgroundModel": settings.background_model,
             "thinkModel": settings.think_model,
+            "webSearchModel": settings.web_search_model,
         },
     }
     for name, p in profiles.items():

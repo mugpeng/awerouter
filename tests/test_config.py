@@ -168,7 +168,7 @@ class TestLoadRouting:
     def test_settings_explicit(self, tmp_path, monkeypatch):
         monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
         _write_config(tmp_path, {}, {
-            "settings": {"backgroundModel": "bg", "thinkModel": "strong"},
+            "settings": {"backgroundModel": "bg", "thinkModel": "strong", "webSearchModel": "flash"},
             "cc-1": {
                 "agent": "claude", "longContextThreshold": 1,
                 "destinations": {"flash": "p,m", "pro": "p,m"},
@@ -177,6 +177,7 @@ class TestLoadRouting:
         settings, _ = load_routing()
         assert settings.background_model == "bg"
         assert settings.think_model == "strong"
+        assert settings.web_search_model == "flash"
 
     def test_multiple_profiles(self, tmp_path, monkeypatch):
         monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
@@ -287,7 +288,7 @@ class TestFormatDisplay:
         assert data["claude"]["p"]["auth"] == "${K}"
 
     def test_routing_shows_settings_and_profiles(self):
-        settings = Settings(background_model="flash", think_model="pro")
+        settings = Settings(background_model="flash", think_model="pro", web_search_model="pro")
         profiles = {
             "cc-1": RoutingProfile("cc-1", "claude", 8000, {
                 "flash": Destination("p", "m1"), "pro": Destination("p", "m2"),
@@ -295,5 +296,6 @@ class TestFormatDisplay:
         }
         data = json.loads(format_routing_display(settings, profiles))
         assert data["settings"]["backgroundModel"] == "flash"
+        assert data["settings"]["webSearchModel"] == "pro"
         assert data["cc-1"]["agent"] == "claude"
         assert "backgroundModel" not in data["cc-1"]

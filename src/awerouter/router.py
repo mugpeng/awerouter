@@ -33,16 +33,18 @@ def resolve(
     background_model: str,
     think_model: str,
     long_context_threshold: int,
+    web_search_model: str = "pro",
 ) -> ResolveResult:
     feat = inspect(body)
     m = model or ""
 
     # L1: capability guard ------------------------------------------------
     if feat.has_web_search:
+        dest_key = web_search_model
         return ResolveResult(
-            destination="pro",
-            provider=dests["pro"].provider,
-            model=dests["pro"].model,
+            destination=dest_key,
+            provider=dests[dest_key].provider,
+            model=dests[dest_key].model,
             label="webSearch",
             inspect=feat,
         )

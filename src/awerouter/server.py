@@ -109,6 +109,7 @@ class _RoutingState:
             settings.background_model,
             settings.think_model,
             profile.long_context_threshold,
+            settings.web_search_model,
         )
         self.attempt = 0
         self.streaming_started = False
@@ -239,6 +240,7 @@ async def handle_count_tokens(request: web.Request) -> web.Response:
         settings.background_model,
         settings.think_model,
         profile.long_context_threshold,
+        settings.web_search_model,
     )
     dest = profile.destinations[result.destination]
     provider = providers[dest.provider_name]

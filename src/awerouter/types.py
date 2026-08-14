@@ -28,6 +28,7 @@ class Settings:
     """Global routing settings (shared across all profiles)."""
     background_model: str = "flash"   # L2 tier-label for background → flash dest
     think_model: str = "pro"          # L2 tier-label for think → pro dest
+    web_search_model: str = "pro"     # L1 web_search destination key
 
 
 @dataclass

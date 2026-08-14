@@ -1,7 +1,8 @@
 {
   "settings": {
     "backgroundModel": "flash",
-    "thinkModel": "pro"
+    "thinkModel": "pro",
+    "webSearchModel": "pro"
   },
   "cc-router-1": {
     "agent": "claude",

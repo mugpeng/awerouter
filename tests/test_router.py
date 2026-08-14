@@ -20,8 +20,8 @@ def _cfg():
     }
 
 
-def _resolve(model, body, threshold=32000):
-    return resolve(model, body, _cfg(), "flash", "think", threshold)
+def _resolve(model, body, threshold=32000, web_search_model="pro"):
+    return resolve(model, body, _cfg(), "flash", "think", threshold, web_search_model)
 
 
 # ---------------------------------------------------------------------------
@@ -85,6 +85,13 @@ class TestResolve:
         body = {"messages": [{"content": "?"}], "tools": [{"name": "web_search_20250813"}]}
         r = _resolve("flash", body)
         assert r.destination == "pro"
+
+    def test_l1_web_search_can_go_flash(self):
+        """If flash provider supports web_search, route there."""
+        body = {"messages": [{"content": "hi"}], "tools": [{"name": "web_search_20250813"}]}
+        r = _resolve("flash", body, web_search_model="flash")
+        assert r.destination == "flash"
+        assert r.label == "webSearch"
 
     # L2: tier labels
 
