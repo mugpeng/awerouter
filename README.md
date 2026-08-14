@@ -67,10 +67,12 @@ The auth header is **auto-detected from `base_url`**: `anthropic.com` → `x-api
 
 ```json
 {
+  "settings": {
+    "backgroundModel": "flash",
+    "thinkModel": "pro"
+  },
   "cc-router-1": {
     "agent": "claude",
-    "backgroundModel": "c1/flash",
-    "thinkModel": "c1/think",
     "longContextThreshold": 8000,
     "destinations": {
       "flash": "stepfun,step-3.7-flash",
@@ -79,6 +81,8 @@ The auth header is **auto-detected from `base_url`**: `anthropic.com` → `x-api
   }
 }
 ```
+
+`settings` is optional (defaults: `flash`/`pro`). It defines the model ids CC sends for background (Haiku) and think (Opus) tiers. The main loop uses `auto` — routed by difficulty by L3. Set these in your aweswitch profile: `ANTHROPIC_DEFAULT_HAIKU_MODEL=flash`, `ANTHROPIC_MODEL=auto`, `ANTHROPIC_DEFAULT_OPUS_MODEL=pro`.
 
 Keys reference `${ENV_VAR}` syntax. Missing env vars die with a clear message at startup.
 

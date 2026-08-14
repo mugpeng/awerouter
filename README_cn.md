@@ -67,10 +67,12 @@ export ANTHROPIC_BASE_URL=http://127.0.0.1:20128
 
 ```json
 {
+  "settings": {
+    "backgroundModel": "flash",
+    "thinkModel": "pro"
+  },
   "cc-router-1": {
     "agent": "claude",
-    "backgroundModel": "c1/flash",
-    "thinkModel": "c1/think",
     "longContextThreshold": 8000,
     "destinations": {
       "flash": "stepfun,step-3.7-flash",
@@ -79,6 +81,8 @@ export ANTHROPIC_BASE_URL=http://127.0.0.1:20128
   }
 }
 ```
+
+`settings` 可省（默认 `flash`/`pro`）。它定义 CC 发送的档位 model id：background（Haiku 档）和 think（Opus 档）。主循环用 `auto`——由 L3 按难度路由。在 aweswitch profile 里设：`ANTHROPIC_DEFAULT_HAIKU_MODEL=flash`、`ANTHROPIC_MODEL=auto`、`ANTHROPIC_DEFAULT_OPUS_MODEL=pro`。
 
 密钥用 `${ENV_VAR}` 引用。缺失的环境变量在启动时报错退出。
 

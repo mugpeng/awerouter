@@ -1,8 +1,10 @@
 {
+  "settings": {
+    "backgroundModel": "flash",
+    "thinkModel": "pro"
+  },
   "cc-router-1": {
     "agent": "claude",
-    "backgroundModel": "c1/flash",
-    "thinkModel": "c1/think",
     "longContextThreshold": 8000,
     "destinations": {
       "flash": "stepfun,step-3.7-flash",

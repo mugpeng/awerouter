@@ -97,18 +97,18 @@ async def _proxy_request(
 class _RoutingState:
     """Mutable routing state shared across the retry loop."""
 
-    def __init__(self, providers: dict, routing, body: dict):
+    def __init__(self, providers: dict, profile, settings, body: dict):
         self.providers = providers
-        self.routing = routing
+        self.profile = profile
         self.body = body
         self.inbound_model = body.get("model") or ""
         self.result = resolve(
             self.inbound_model if self.inbound_model else None,
             body,
-            routing.destinations,
-            routing.background_model,
-            routing.think_model,
-            routing.long_context_threshold,
+            profile.destinations,
+            settings.background_model,
+            settings.think_model,
+            profile.long_context_threshold,
         )
         self.attempt = 0
         self.streaming_started = False
@@ -116,7 +116,8 @@ class _RoutingState:
 
 async def handle_messages(request: web.Request) -> web.StreamResponse:
     providers: dict = request.app["providers"]
-    routing = request.app["routing"]
+    profile = request.app["profile"]
+    settings = request.app["settings"]
     session: aiohttp.ClientSession = request.app["session"]
 
     t0 = time.monotonic()
@@ -131,11 +132,11 @@ async def handle_messages(request: web.Request) -> web.StreamResponse:
         sock_read=None if is_stream else 120,
     )
 
-    state = _RoutingState(providers, routing, body)
+    state = _RoutingState(providers, profile, settings, body)
 
     while True:
         dest_key = state.result.destination
-        dest = state.routing.destinations[dest_key]
+        dest = state.profile.destinations[dest_key]
         state.attempt += 1
 
         try:
@@ -209,7 +210,7 @@ async def handle_messages(request: web.Request) -> web.StreamResponse:
 
 def _fallback_result(state: _RoutingState) -> ResolveResult:
     """Return a new resolve result for the pro fallback."""
-    pro_dest = state.routing.destinations["pro"]
+    pro_dest = state.profile.destinations["pro"]
     pro_provider = state.providers[pro_dest.provider_name]
     label = state.result.label + "→fallback"
     return ResolveResult(
@@ -223,7 +224,8 @@ def _fallback_result(state: _RoutingState) -> ResolveResult:
 
 async def handle_count_tokens(request: web.Request) -> web.Response:
     providers: dict = request.app["providers"]
-    routing = request.app["routing"]
+    profile = request.app["profile"]
+    settings = request.app["settings"]
     session: aiohttp.ClientSession = request.app["session"]
 
     body = await request.json()
@@ -233,12 +235,12 @@ async def handle_count_tokens(request: web.Request) -> web.Response:
     model = body.get("model")
     result = resolve(
         model, body,
-        routing.destinations,
-        routing.background_model,
-        routing.think_model,
-        routing.long_context_threshold,
+        profile.destinations,
+        settings.background_model,
+        settings.think_model,
+        profile.long_context_threshold,
     )
-    dest = routing.destinations[result.destination]
+    dest = profile.destinations[result.destination]
     provider = providers[dest.provider_name]
 
     upstream_url = provider.base_url.rstrip("/") + request.path
@@ -260,11 +262,11 @@ async def handle_count_tokens(request: web.Request) -> web.Response:
 
 
 async def handle_models(request: web.Request) -> web.Response:
-    routing: "RoutingProfile" = request.app["routing"]
+    settings = request.app["settings"]
     models = [
-        {"id": routing.background_model, "object": "model"},
-        {"id": "c1/pro", "object": "model"},
-        {"id": routing.think_model, "object": "model"},
+        {"id": settings.background_model, "object": "model"},
+        {"id": "auto", "object": "model"},
+        {"id": settings.think_model, "object": "model"},
     ]
     return web.json_response({"data": models, "object": "list"})
 
@@ -291,10 +293,11 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def create_app(providers: dict, routing) -> web.Application:
+def create_app(providers: dict, profile, settings) -> web.Application:
     app = web.Application()
     app["providers"] = providers
-    app["routing"] = routing
+    app["profile"] = profile
+    app["settings"] = settings
     app["version"] = "0.1.0"
 
     session = aiohttp.ClientSession()
@@ -319,16 +322,17 @@ def create_app(providers: dict, routing) -> web.Application:
 # ---------------------------------------------------------------------------
 
 
-async def _serve(host: str, port: int, providers: dict, routing) -> None:
-    app = create_app(providers, routing)
+async def _serve(host: str, port: int, providers: dict, profile, settings) -> None:
+    app = create_app(providers, profile, settings)
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, host=host, port=port)
     await site.start()
-    print(f"awerouter listening on {host}:{port}  [{routing.name}]")
-    print(f"  agent  -> {routing.agent}")
-    print(f"  flash  -> {routing.destinations['flash'].provider_name}/{routing.destinations['flash'].model}")
-    print(f"  pro    -> {routing.destinations['pro'].provider_name}/{routing.destinations['pro'].model}")
+    print(f"awerouter listening on {host}:{port}  [{profile.name}]")
+    print(f"  agent  -> {profile.agent}")
+    print(f"  bg     -> {settings.background_model}  think -> {settings.think_model}  main -> auto")
+    print(f"  flash  -> {profile.destinations['flash'].provider_name}/{profile.destinations['flash'].model}")
+    print(f"  pro    -> {profile.destinations['pro'].provider_name}/{profile.destinations['pro'].model}")
     try:
         await asyncio.Event().wait()
     except asyncio.CancelledError:

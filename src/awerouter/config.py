@@ -8,7 +8,7 @@ from typing import Optional
 import click
 
 from awerouter import __version__
-from awerouter.types import Destination, Provider, RoutingProfile
+from awerouter.types import Destination, Provider, RoutingProfile, Settings
 
 # ---------------------------------------------------------------------------
 # Constants (mirror aweswitch cli.py conventions exactly)
@@ -138,10 +138,20 @@ def load_providers(path: Optional[Path] = None) -> dict[str, dict[str, Provider]
     return result
 
 
-def load_routing(path: Optional[Path] = None) -> dict[str, RoutingProfile]:
-    """Load all routing profiles keyed by profile id."""
+def load_routing(path: Optional[Path] = None) -> tuple[Settings, dict[str, RoutingProfile]]:
+    """Load global settings + all routing profiles keyed by profile id."""
     path = path or routing_path()
     data = _load_json(path, "routing.json")
+
+    # Parse optional global settings (defaults: flash/pro)
+    raw_settings = data.pop("settings", {})
+    if not isinstance(raw_settings, dict):
+        die("routing.json 'settings' must be an object")
+    settings = Settings(
+        background_model=str(raw_settings.get("backgroundModel", "flash")),
+        think_model=str(raw_settings.get("thinkModel", "pro")),
+    )
+
     profiles: dict[str, RoutingProfile] = {}
     for name, body in data.items():
         if not isinstance(body, dict):
@@ -149,7 +159,7 @@ def load_routing(path: Optional[Path] = None) -> dict[str, RoutingProfile]:
         agent = body.get("agent")
         if not agent:
             die(f"profile '{name}' missing required 'agent' field")
-        for key in ("backgroundModel", "thinkModel", "longContextThreshold", "destinations"):
+        for key in ("longContextThreshold", "destinations"):
             if key not in body:
                 die(f"profile '{name}' missing required key: {key}")
         dests_raw = body["destinations"]
@@ -163,12 +173,10 @@ def load_routing(path: Optional[Path] = None) -> dict[str, RoutingProfile]:
         profiles[name] = RoutingProfile(
             name=name,
             agent=str(agent),
-            background_model=str(body["backgroundModel"]),
-            think_model=str(body["thinkModel"]),
             long_context_threshold=int(body["longContextThreshold"]),
             destinations=parsed,
         )
-    return profiles
+    return settings, profiles
 
 
 def resolve_provider(name: str, providers: dict[str, Provider]) -> Provider:
@@ -178,10 +186,10 @@ def resolve_provider(name: str, providers: dict[str, Provider]) -> Provider:
     return providers[name]
 
 
-def load_for_profile(name: str) -> tuple[dict[str, Provider], RoutingProfile]:
-    """Resolve one profile: returns (that agent's providers, profile) with dest refs attached."""
+def load_for_profile(name: str) -> tuple[dict[str, Provider], RoutingProfile, Settings]:
+    """Resolve one profile: returns (agent providers, profile, settings)."""
     providers_all = load_providers()
-    profiles = load_routing()
+    settings, profiles = load_routing()
     if name not in profiles:
         avail = ", ".join(profiles) or "(none)"
         die(f"profile '{name}' not found in routing.json; available: {avail}")
@@ -192,12 +200,12 @@ def load_for_profile(name: str) -> tuple[dict[str, Provider], RoutingProfile]:
     agent_providers = providers_all[profile.agent]
     for tier, dest in profile.destinations.items():
         dest.provider = resolve_provider(dest.provider_name, agent_providers)
-    return agent_providers, profile
+    return agent_providers, profile, settings
 
 
-def load_default_profile() -> tuple[dict[str, Provider], RoutingProfile]:
+def load_default_profile() -> tuple[dict[str, Provider], RoutingProfile, Settings]:
     """Auto-select when only one profile exists; prompt otherwise."""
-    profiles = load_routing()
+    settings, profiles = load_routing()
     if not profiles:
         die("no profiles in routing.json")
     if len(profiles) == 1:
@@ -242,13 +250,16 @@ def format_providers_display(all_providers: dict[str, dict[str, Provider]]) -> s
     return json.dumps(display, indent=2)
 
 
-def format_routing_display(profiles: dict[str, RoutingProfile]) -> str:
-    display = {}
+def format_routing_display(settings: Settings, profiles: dict[str, RoutingProfile]) -> str:
+    display = {
+        "settings": {
+            "backgroundModel": settings.background_model,
+            "thinkModel": settings.think_model,
+        },
+    }
     for name, p in profiles.items():
         display[name] = {
             "agent": p.agent,
-            "backgroundModel": p.background_model,
-            "thinkModel": p.think_model,
             "longContextThreshold": p.long_context_threshold,
             "destinations": {
                 k: f"{v.provider_name},{v.model}" for k, v in p.destinations.items()
@@ -287,7 +298,7 @@ def config_show_cmd():
     click.echo(format_providers_display(load_providers()))
     click.echo()
     click.echo("routing.json:")
-    click.echo(format_routing_display(load_routing()))
+    click.echo(format_routing_display(*load_routing()))
 
 
 @config.command("edit")

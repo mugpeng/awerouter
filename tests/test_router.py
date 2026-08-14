@@ -21,7 +21,7 @@ def _cfg():
 
 
 def _resolve(model, body, threshold=32000):
-    return resolve(model, body, _cfg(), "c1/flash", "c1/think", threshold)
+    return resolve(model, body, _cfg(), "flash", "think", threshold)
 
 
 # ---------------------------------------------------------------------------
@@ -77,26 +77,26 @@ class TestResolve:
 
     def test_l1_web_search_forces_pro(self):
         body = {"messages": [{"content": "hi"}], "tools": [{"name": "web_search_20250813"}]}
-        r = _resolve("c1/flash", body)
+        r = _resolve("flash", body)
         assert r.destination == "pro"
         assert r.label == "webSearch"
 
     def test_l1_web_search_short_query(self):
         body = {"messages": [{"content": "?"}], "tools": [{"name": "web_search_20250813"}]}
-        r = _resolve("c1/flash", body)
+        r = _resolve("flash", body)
         assert r.destination == "pro"
 
     # L2: tier labels
 
     def test_l2_background_goes_flash(self):
         body = {"messages": [{"content": "hi"}]}
-        r = _resolve("c1/flash", body)
+        r = _resolve("flash", body)
         assert r.destination == "flash"
         assert r.label == "background"
 
     def test_l2_think_goes_pro(self):
         body = {"messages": [{"content": "think hard"}]}
-        r = _resolve("c1/think", body)
+        r = _resolve("think", body)
         assert r.destination == "pro"
         assert r.label == "think"
 
@@ -104,19 +104,19 @@ class TestResolve:
 
     def test_l3_long_context_goes_pro(self):
         body = {"messages": [{"content": "x" * 500}]}
-        r = _resolve("c1/pro", body, threshold=100)
+        r = _resolve("auto", body, threshold=100)
         assert r.destination == "pro"
         assert r.label == "longContext"
 
     def test_l3_image_goes_pro(self):
         body = {"messages": [{"content": [{"type": "image", "data": "x"}]}]}
-        r = _resolve("c1/pro", body)
+        r = _resolve("auto", body)
         assert r.destination == "pro"
         assert r.label == "image"
 
     def test_l3_default_goes_flash(self):
         body = {"messages": [{"content": "short question"}]}
-        r = _resolve("c1/pro", body)
+        r = _resolve("auto", body)
         assert r.destination == "flash"
         assert r.label == "default"
 
@@ -127,7 +127,7 @@ class TestResolve:
 
     def test_l3_no_messages_defaults_flash(self):
         body = {}
-        r = _resolve("c1/pro", body)
+        r = _resolve("auto", body)
         assert r.destination == "flash"
 
     # Priority: L1 > L2 > L3
@@ -135,12 +135,12 @@ class TestResolve:
     def test_priority_web_search_over_l2(self):
         # model=c1/flash would go L2 flash, but L1 web_search wins
         body = {"messages": [{"content": "search"}], "tools": [{"name": "web_search_20250813"}]}
-        r = _resolve("c1/flash", body)
+        r = _resolve("flash", body)
         assert r.destination == "pro"
         assert r.label == "webSearch"
 
     def test_priority_think_over_l3(self):
         # model=c1/think -> L2 pro, even if short (L3 would also be pro)
         body = {"messages": [{"content": "hi"}]}
-        r = _resolve("c1/think", body)
+        r = _resolve("think", body)
         assert r.label == "think"

@@ -24,11 +24,16 @@ class Destination:
 
 
 @dataclass
+class Settings:
+    """Global routing settings (shared across all profiles)."""
+    background_model: str = "flash"   # L2 tier-label for background → flash dest
+    think_model: str = "pro"          # L2 tier-label for think → pro dest
+
+
+@dataclass
 class RoutingProfile:
     name: str                       # profile id, e.g. "cc-router-1"
     agent: str                      # maps to a providers.json group: "claude" / "codex"
-    background_model: str
-    think_model: str
     long_context_threshold: int
     destinations: dict[str, Destination]
 

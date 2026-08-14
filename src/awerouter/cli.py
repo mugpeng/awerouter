@@ -29,11 +29,11 @@ def serve(profile: str | None, port: int, host: str):
     one profile exists.
     """
     if profile:
-        providers, routing = load_for_profile(profile)
+        providers, routing, settings = load_for_profile(profile)
     else:
-        providers, routing = load_default_profile()
+        providers, routing, settings = load_default_profile()
     try:
-        asyncio.run(_serve(host, port, providers, routing))
+        asyncio.run(_serve(host, port, providers, routing, settings))
     except KeyboardInterrupt:
         raise SystemExit(0)
 

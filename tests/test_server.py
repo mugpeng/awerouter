@@ -8,20 +8,20 @@ from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
 from awerouter.server import create_app
-from awerouter.types import Destination, Provider, RoutingProfile
+from awerouter.types import Destination, Provider, RoutingProfile, Settings
 
 
 ROUTING = RoutingProfile(
     name="test",
     agent="claude",
-    background_model="c1/flash",
-    think_model="c1/think",
     long_context_threshold=32,
     destinations={
         "flash": Destination("stepfun", "step-3.5-flash"),
         "pro": Destination("anthropic", "claude-opus-5"),
     },
 )
+
+SETTINGS = Settings()  # defaults: background=flash, think=pro
 
 
 def _providers(port):
@@ -45,7 +45,7 @@ def _tmp_log(tmp_path, monkeypatch):
 class TestAwerouter:
     def test_root(self):
         async def t():
-            app = create_app(_providers(0), ROUTING)
+            app = create_app(_providers(0), ROUTING, SETTINGS)
             async with TestClient(TestServer(app)) as c:
                 r = await c.get("/")
                 assert r.status == 200
@@ -56,14 +56,15 @@ class TestAwerouter:
 
     def test_v1_models(self):
         async def t():
-            app = create_app(_providers(0), ROUTING)
+            app = create_app(_providers(0), ROUTING, SETTINGS)
             async with TestClient(TestServer(app)) as c:
                 r = await c.get("/v1/models")
                 assert r.status == 200
                 d = await r.json()
                 ids = [m["id"] for m in d["data"]]
-                assert "c1/flash" in ids
-                assert "c1/think" in ids
+                assert "flash" in ids
+                assert "auto" in ids
+                assert "pro" in ids
         run(t())
 
     def test_flash_route(self):
@@ -77,10 +78,10 @@ class TestAwerouter:
             up_server = TestServer(up_app)
             await up_server.start_server()
             try:
-                app = create_app(_providers(up_server.port), ROUTING)
+                app = create_app(_providers(up_server.port), ROUTING, SETTINGS)
                 async with TestClient(TestServer(app)) as c:
                     r = await c.post("/v1/messages", json={
-                        "model": "c1/flash",
+                        "model": "flash",
                         "messages": [{"content": "hi"}],
                     })
                     assert r.status == 200
@@ -105,10 +106,10 @@ class TestAwerouter:
             up_server = TestServer(up_app)
             await up_server.start_server()
             try:
-                app = create_app(_providers(up_server.port), ROUTING)
+                app = create_app(_providers(up_server.port), ROUTING, SETTINGS)
                 async with TestClient(TestServer(app)) as c:
                     r = await c.post("/v1/messages", json={
-                        "model": "c1/think",
+                        "model": "pro",
                         "messages": [{"content": "think"}],
                     })
                     assert r.status == 200
@@ -133,10 +134,10 @@ class TestAwerouter:
             up_server = TestServer(up_app)
             await up_server.start_server()
             try:
-                app = create_app(_providers(up_server.port), ROUTING)
+                app = create_app(_providers(up_server.port), ROUTING, SETTINGS)
                 async with TestClient(TestServer(app)) as c:
                     await c.post("/v1/messages", json={
-                        "model": "c1/flash",
+                        "model": "flash",
                         "messages": [{"content": "hi"}],
                     })
                     # flash provider uses ${STEPFUN_KEY}="flash-key", authorization header
@@ -161,10 +162,10 @@ class TestAwerouter:
             up_server = TestServer(up_app)
             await up_server.start_server()
             try:
-                app = create_app(_providers(up_server.port), ROUTING)
+                app = create_app(_providers(up_server.port), ROUTING, SETTINGS)
                 async with TestClient(TestServer(app)) as c:
                     r = await c.post("/v1/messages", json={
-                        "model": "c1/flash",
+                        "model": "flash",
                         "messages": [{"content": "hi"}],
                         "stream": True,
                     })
@@ -194,10 +195,10 @@ class TestAwerouter:
             up_server = TestServer(up_app)
             await up_server.start_server()
             try:
-                app = create_app(_providers(up_server.port), ROUTING)
+                app = create_app(_providers(up_server.port), ROUTING, SETTINGS)
                 async with TestClient(TestServer(app)) as c:
                     r = await c.post("/v1/messages", json={
-                        "model": "c1/flash",
+                        "model": "flash",
                         "messages": [{"content": "hi"}],
                     })
                     assert r.status == 200
@@ -220,10 +221,10 @@ class TestAwerouter:
             up_server = TestServer(up_app)
             await up_server.start_server()
             try:
-                app = create_app(_providers(up_server.port), ROUTING)
+                app = create_app(_providers(up_server.port), ROUTING, SETTINGS)
                 async with TestClient(TestServer(app)) as c:
                     r = await c.post("/v1/messages/count_tokens", json={
-                        "model": "c1/flash",
+                        "model": "flash",
                         "messages": [{"content": "hi"}],
                     })
                     assert r.status == 200
@@ -244,11 +245,11 @@ class TestAwerouter:
             up_server = TestServer(up_app)
             await up_server.start_server()
             try:
-                app = create_app(_providers(up_server.port), ROUTING)
+                app = create_app(_providers(up_server.port), ROUTING, SETTINGS)
                 async with TestClient(TestServer(app)) as c:
                     # model=c1/pro, short text -> L3 default -> flash
                     r = await c.post("/v1/messages", json={
-                        "model": "c1/pro",
+                        "model": "auto",
                         "messages": [{"content": "short"}],
                     })
                     assert r.status == 200
@@ -269,11 +270,11 @@ class TestAwerouter:
             up_server = TestServer(up_app)
             await up_server.start_server()
             try:
-                app = create_app(_providers(up_server.port), ROUTING)
+                app = create_app(_providers(up_server.port), ROUTING, SETTINGS)
                 async with TestClient(TestServer(app)) as c:
                     # model=c1/pro, long text -> L3 longContext -> pro
                     r = await c.post("/v1/messages", json={
-                        "model": "c1/pro",
+                        "model": "auto",
                         "messages": [{"content": "x" * 200}],
                     })
                     assert r.status == 200
