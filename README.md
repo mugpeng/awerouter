@@ -110,7 +110,7 @@ awerouter stats
 awerouter calibrate
 ```
 
-`calibrate` shows the token distribution of L3 traffic (the threshold-sensitive layer) and suggests candidate `longContextThreshold` values at p90/p95/p99. Run it after some real traffic, then edit `routing.json`.
+`calibrate` shows the message-token distribution of L3 traffic (the threshold-sensitive layer; messages only — system prompt and tools are excluded) and suggests candidate `longContextThreshold` values at p90/p95/p99. Run it after some real traffic, then edit `routing.json`.
 
 ## Development
 

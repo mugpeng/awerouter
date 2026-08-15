@@ -11,7 +11,7 @@ from awerouter.types import RequestLog
 
 def _log(ts: str, label: str, token_count: int, destination="flash", bytes_=100):
     return RequestLog(
-        ts=ts, model_in="c1/pro", label=label, destination=destination,
+        ts=ts, request_id="req-1", model_in="c1/pro", label=label, destination=destination,
         provider="p", model_out="m", status=200, ms=10, bytes=bytes_,
         token_count=token_count,
     )
@@ -51,6 +51,40 @@ class TestTail:
         entries = tail(3)
         assert len(entries) == 3
         assert entries[-1].token_count == 4
+
+    def test_returns_request_id(self, _log_dir):
+        from awerouter.logging import append
+        append(_log("t0", "default", 1))
+        assert tail(1)[0].request_id == "req-1"
+
+    def test_large_file_tail_from_end(self, _log_dir):
+        """tail must not need the whole file — write many long lines, ask for few."""
+        from awerouter.logging import append
+        for i in range(2000):
+            append(_log(f"t{i}", "default", i, bytes_=200))
+        entries = tail(5)
+        assert len(entries) == 5
+        assert entries[-1].ts == "t1999"
+        assert entries[0].ts == "t1995"
+
+
+class TestRotation:
+    def test_rotates_when_over_cap(self, _log_dir, monkeypatch):
+        from awerouter.logging import append
+        monkeypatch.setenv("AWEROUTER_LOG_MAX_BYTES", "1")
+        append(_log("t1", "default", 1))
+        append(_log("t2", "default", 2))
+        assert (_log_dir / "requests.jsonl.1").exists()
+        # current file holds only the latest entry
+        entries = tail(10)
+        assert [e.ts for e in entries] == ["t2"]
+
+    def test_no_rotation_under_cap(self, _log_dir):
+        from awerouter.logging import append
+        append(_log("t1", "default", 1))
+        append(_log("t2", "default", 2))
+        assert not (_log_dir / "requests.jsonl.1").exists()
+        assert len(tail(10)) == 2
 
 
 class TestTokenDistribution:

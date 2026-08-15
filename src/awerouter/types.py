@@ -20,7 +20,6 @@ class Provider:
 class Destination:
     provider_name: str
     model: str
-    provider: Provider | None = None
 
 
 @dataclass
@@ -50,7 +49,6 @@ class InspectResult:
 @dataclass
 class ResolveResult:
     destination: str
-    provider: Provider
     model: str
     label: str
     inspect: InspectResult
@@ -59,6 +57,7 @@ class ResolveResult:
 @dataclass
 class RequestLog:
     ts: str
+    request_id: str
     model_in: str
     label: str
     destination: str

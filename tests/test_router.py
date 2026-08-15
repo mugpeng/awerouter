@@ -10,13 +10,13 @@ from awerouter.router import (
     inspect,
     resolve,
 )
-from awerouter.types import Destination, Provider
+from awerouter.types import Destination
 
 
 def _cfg():
     return {
-        "flash": Destination("stepfun", "step-3.5-flash", Provider("stepfun", "http://x", "k")),
-        "pro": Destination("anthropic", "claude-opus-5", Provider("anthropic", "http://x", "k", "x-api-key")),
+        "flash": Destination("stepfun", "step-3.5-flash"),
+        "pro": Destination("anthropic", "claude-opus-5"),
     }
 
 

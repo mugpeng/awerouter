@@ -110,7 +110,7 @@ awerouter stats
 awerouter calibrate
 ```
 
-`calibrate` 展示 L3 流量（受阈值影响的层）的 token 分布，并在 p90/p95/p99 处建议 `longContextThreshold` 候选值。跑一段真实流量后执行，再编辑 `routing.json`。
+`calibrate` 展示 L3 流量（受阈值影响的层）的消息 token 分布（仅统计 messages，不含 system prompt 与 tools 定义），并在 p90/p95/p99 处建议 `longContextThreshold` 候选值。跑一段真实流量后执行，再编辑 `routing.json`。
 
 ## 开发
 

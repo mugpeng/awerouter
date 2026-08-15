@@ -7,6 +7,8 @@ from typing import Optional
 
 import click
 
+from urllib.parse import urlparse
+
 from awerouter import __version__
 from awerouter.types import Destination, Provider, RoutingProfile, Settings
 
@@ -29,9 +31,12 @@ def detect_auth_header(base_url: str) -> str:
     """Auto-detect auth header from base_url.
 
     anthropic.com endpoints use x-api-key (bare token); everyone else uses
-    Authorization (Bearer prefix added at request time).
+    Authorization (Bearer prefix added at request time). Matched on netloc,
+    not substring — "https://evil.com/anthropic.com" must not match.
     """
-    return "x-api-key" if "anthropic.com" in base_url else "authorization"
+    netloc = urlparse(base_url).netloc.lower()
+    is_anthropic = netloc == "api.anthropic.com" or netloc.endswith(".anthropic.com")
+    return "x-api-key" if is_anthropic else "authorization"
 
 
 # ---------------------------------------------------------------------------
@@ -187,6 +192,24 @@ def resolve_provider(name: str, providers: dict[str, Provider]) -> Provider:
     return providers[name]
 
 
+def validate_profiles(providers_all: dict, profiles: dict) -> None:
+    """Cross-check every profile's agent and destinations against providers.json.
+
+    Called by both serve and config show, so bad references fail at load time
+    instead of on the first request.
+    """
+    for profile in profiles.values():
+        group = providers_all.get(profile.agent)
+        if group is None:
+            avail = ", ".join(providers_all) or "(none)"
+            die(
+                f"agent '{profile.agent}' (for profile '{profile.name}') not found in "
+                f"providers.json; available: {avail}"
+            )
+        for tier, dest in profile.destinations.items():
+            resolve_provider(dest.provider_name, group)
+
+
 def load_for_profile(name: str) -> tuple[dict[str, Provider], RoutingProfile, Settings]:
     """Resolve one profile: returns (agent providers, profile, settings)."""
     providers_all = load_providers()
@@ -195,13 +218,8 @@ def load_for_profile(name: str) -> tuple[dict[str, Provider], RoutingProfile, Se
         avail = ", ".join(profiles) or "(none)"
         die(f"profile '{name}' not found in routing.json; available: {avail}")
     profile = profiles[name]
-    if profile.agent not in providers_all:
-        avail = ", ".join(providers_all) or "(none)"
-        die(f"agent '{profile.agent}' (for profile '{name}') not found in providers.json; available: {avail}")
-    agent_providers = providers_all[profile.agent]
-    for tier, dest in profile.destinations.items():
-        dest.provider = resolve_provider(dest.provider_name, agent_providers)
-    return agent_providers, profile, settings
+    validate_profiles(providers_all, {name: profile})
+    return providers_all[profile.agent], profile, settings
 
 
 def load_default_profile() -> tuple[dict[str, Provider], RoutingProfile, Settings]:
@@ -296,11 +314,14 @@ def config_path_cmd():
 @config.command("show")
 def config_show_cmd():
     """Show config (secrets redacted)."""
+    providers_all = load_providers()
+    settings, profiles = load_routing()
+    validate_profiles(providers_all, profiles)
     click.echo("providers.json:" )
-    click.echo(format_providers_display(load_providers()))
+    click.echo(format_providers_display(providers_all))
     click.echo()
     click.echo("routing.json:")
-    click.echo(format_routing_display(*load_routing()))
+    click.echo(format_routing_display(settings, profiles))
 
 
 @config.command("edit")

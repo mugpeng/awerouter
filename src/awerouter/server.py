@@ -9,6 +9,7 @@ import asyncio
 import json
 import os
 import time
+import uuid
 
 import aiohttp
 from aiohttp import web
@@ -74,7 +75,8 @@ async def _proxy_request(
     provider = providers[dest.provider_name]
     upstream_url = provider.base_url.rstrip("/") + path
 
-    # Rewrite model to the destination's real model id
+    # Rewrite model to the destination's real model id (copy: body is reused across retries)
+    body = dict(body)
     body["model"] = dest.model
 
     # Auth
@@ -94,23 +96,27 @@ async def _proxy_request(
 # ---------------------------------------------------------------------------
 
 
+def _resolve_for_request(body: dict, profile, settings) -> ResolveResult:
+    """Shared routing decision for messages and count_tokens."""
+    return resolve(
+        body.get("model") or None,
+        body,
+        profile.destinations,
+        settings.background_model,
+        settings.think_model,
+        profile.long_context_threshold,
+        settings.web_search_model,
+    )
+
+
 class _RoutingState:
     """Mutable routing state shared across the retry loop."""
 
-    def __init__(self, providers: dict, profile, settings, body: dict):
-        self.providers = providers
+    def __init__(self, profile, settings, body: dict):
         self.profile = profile
         self.body = body
         self.inbound_model = body.get("model") or ""
-        self.result = resolve(
-            self.inbound_model if self.inbound_model else None,
-            body,
-            profile.destinations,
-            settings.background_model,
-            settings.think_model,
-            profile.long_context_threshold,
-            settings.web_search_model,
-        )
+        self.result = _resolve_for_request(body, profile, settings)
         self.attempt = 0
         self.streaming_started = False
 
@@ -122,6 +128,7 @@ async def handle_messages(request: web.Request) -> web.StreamResponse:
     session: aiohttp.ClientSession = request.app["session"]
 
     t0 = time.monotonic()
+    request_id = request.headers.get("x-request-id") or uuid.uuid4().hex[:12]
     body = await request.json()
     headers = _filter_headers(dict(request.headers))
 
@@ -133,7 +140,7 @@ async def handle_messages(request: web.Request) -> web.StreamResponse:
         sock_read=None if is_stream else 120,
     )
 
-    state = _RoutingState(providers, profile, settings, body)
+    state = _RoutingState(profile, settings, body)
 
     while True:
         dest_key = state.result.destination
@@ -195,6 +202,7 @@ async def handle_messages(request: web.Request) -> web.StreamResponse:
         ensure_log_dir()
         append(RequestLog(
             ts=_now_iso(),
+            request_id=request_id,
             model_in=state.inbound_model or "<none>",
             label=state.result.label,
             destination=dest_key,
@@ -212,13 +220,10 @@ async def handle_messages(request: web.Request) -> web.StreamResponse:
 def _fallback_result(state: _RoutingState) -> ResolveResult:
     """Return a new resolve result for the pro fallback."""
     pro_dest = state.profile.destinations["pro"]
-    pro_provider = state.providers[pro_dest.provider_name]
-    label = state.result.label + "→fallback"
     return ResolveResult(
         destination="pro",
-        provider=pro_provider,
         model=pro_dest.model,
-        label=label,
+        label=state.result.label + "→fallback",
         inspect=state.result.inspect,
     )
 
@@ -233,15 +238,7 @@ async def handle_count_tokens(request: web.Request) -> web.Response:
     headers = _filter_headers(dict(request.headers))
 
     # Resolve destination (same logic as messages)
-    model = body.get("model")
-    result = resolve(
-        model, body,
-        profile.destinations,
-        settings.background_model,
-        settings.think_model,
-        profile.long_context_threshold,
-        settings.web_search_model,
-    )
+    result = _resolve_for_request(body, profile, settings)
     dest = profile.destinations[result.destination]
     provider = providers[dest.provider_name]
 

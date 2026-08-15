@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+Code-quality hardening pass (no behavior change on the happy path).
+
+### Fixed / Hardened
+- `_proxy_request` no longer mutates the request body in place (shallow copy per upstream attempt).
+- `Destination` is pure data again: provider resolution happens at the call site, removing the two-phase init and the lying `ResolveResult.provider` type.
+- `detect_auth_header` matches the URL netloc instead of a substring — `https://evil.com/anthropic.com` no longer misdetected as Anthropic.
+- `config show` now cross-validates routing.json destinations against providers.json, so bad references fail immediately instead of on first request.
+
+### Added
+- Per-request `request_id` (reuses client `x-request-id` when present, otherwise generated) written to the request log and shown by `awerouter log`.
+- Log rotation: the request log rotates to `requests.jsonl.1` when it exceeds `AWEROUTER_LOG_MAX_BYTES` (default 50 MB); `awerouter log` reads from the end of the file instead of loading it whole.
+- `calibrate` output now clarifies the distribution counts message tokens only (system prompt and tools excluded).
+
 ## 0.1.0 - 2026-08-13
 
 Initial release of awerouter — a local daemon that routes Claude Code requests to different providers/models based on structural request signals, on a single port.

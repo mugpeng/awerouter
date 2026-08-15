@@ -9,7 +9,7 @@ Three-layer first-match-wins pipeline:
 
 import re
 
-from awerouter.types import Destination, InspectResult, Provider, ResolveResult
+from awerouter.types import Destination, InspectResult, ResolveResult
 
 
 # ---------------------------------------------------------------------------
@@ -43,7 +43,6 @@ def resolve(
         dest_key = web_search_model
         return ResolveResult(
             destination=dest_key,
-            provider=dests[dest_key].provider,
             model=dests[dest_key].model,
             label="webSearch",
             inspect=feat,
@@ -53,7 +52,6 @@ def resolve(
     if m == background_model:
         return ResolveResult(
             destination="flash",
-            provider=dests["flash"].provider,
             model=dests["flash"].model,
             label="background",
             inspect=feat,
@@ -61,7 +59,6 @@ def resolve(
     if m == think_model:
         return ResolveResult(
             destination="pro",
-            provider=dests["pro"].provider,
             model=dests["pro"].model,
             label="think",
             inspect=feat,
@@ -71,7 +68,6 @@ def resolve(
     if feat.token_count > long_context_threshold:
         return ResolveResult(
             destination="pro",
-            provider=dests["pro"].provider,
             model=dests["pro"].model,
             label="longContext",
             inspect=feat,
@@ -79,7 +75,6 @@ def resolve(
     if feat.has_image:
         return ResolveResult(
             destination="pro",
-            provider=dests["pro"].provider,
             model=dests["pro"].model,
             label="image",
             inspect=feat,
@@ -87,7 +82,6 @@ def resolve(
 
     return ResolveResult(
         destination="flash",
-        provider=dests["flash"].provider,
         model=dests["flash"].model,
         label="default",
         inspect=feat,

@@ -50,8 +50,8 @@ def log(lines: int):
     for e in entries:
         status_s = str(e.status) if e.status is not None else "-"
         click.echo(
-            f"{e.ts}  {e.destination:7s}  {e.provider:12s}  "
-            f"{e.model_out:24s}  {e.label:14s}  "
+            f"{e.ts}  {e.request_id[:12]:12s}  {e.destination:7s}  "
+            f"{e.provider:12s}  {e.model_out:24s}  {e.label:14s}  "
             f"status={status_s:>3}  {e.ms}ms  {e.bytes}B  "
             f"tokens={e.token_count}  in={e.model_in}"
         )
@@ -93,7 +93,8 @@ def calibrate():
     if not d:
         click.echo("(no L3 traffic yet — run some non-background/think requests first)")
         return
-    click.echo(f"L3 token distribution ({d['n']} requests):")
+    click.echo(f"L3 message-token distribution ({d['n']} requests):")
+    click.echo("  (messages only — system prompt and tools definitions are excluded)")
     click.echo(f"  min: {d['min']:>7}   p50: {d['p50']:>7}   p75: {d['p75']:>7}")
     click.echo(f"  p90: {d['p90']:>7}   p95: {d['p95']:>7}   p99: {d['p99']:>7}   max: {d['max']:>7}")
     click.echo()

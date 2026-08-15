@@ -91,6 +91,53 @@ class TestAwerouter:
                 await up_server.close()
         run(t())
 
+    def test_request_id_logged(self):
+        async def t():
+            async def up(request):
+                body = await request.json()
+                return web.json_response({"model": body["model"]})
+
+            up_app = web.Application()
+            up_app.router.add_post("/v1/messages", up)
+            up_server = TestServer(up_app)
+            await up_server.start_server()
+            try:
+                app = create_app(_providers(up_server.port), ROUTING, SETTINGS)
+                async with TestClient(TestServer(app)) as c:
+                    await c.post("/v1/messages", json={
+                        "model": "flash",
+                        "messages": [{"content": "hi"}],
+                    }, headers={"x-request-id": "client-rid-123"})
+                from awerouter.logging import tail
+                entries = tail(1)
+                assert entries[0].request_id == "client-rid-123"
+            finally:
+                await up_server.close()
+        run(t())
+
+    def test_request_id_generated_when_absent(self):
+        async def t():
+            async def up(request):
+                body = await request.json()
+                return web.json_response({"model": body["model"]})
+
+            up_app = web.Application()
+            up_app.router.add_post("/v1/messages", up)
+            up_server = TestServer(up_app)
+            await up_server.start_server()
+            try:
+                app = create_app(_providers(up_server.port), ROUTING, SETTINGS)
+                async with TestClient(TestServer(app)) as c:
+                    await c.post("/v1/messages", json={
+                        "model": "flash",
+                        "messages": [{"content": "hi"}],
+                    })
+                from awerouter.logging import tail
+                assert tail(1)[0].request_id  # non-empty generated id
+            finally:
+                await up_server.close()
+        run(t())
+
     def test_pro_route_auth_replaced(self):
         async def t():
             captured = {}

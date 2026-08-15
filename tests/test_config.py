@@ -17,6 +17,7 @@ from awerouter.config import (
     load_providers,
     load_routing,
     redact,
+    validate_profiles,
 )
 from awerouter.types import Destination, Provider, RoutingProfile, Settings
 
@@ -37,6 +38,13 @@ class TestDetectAuthHeader:
 
     def test_other(self):
         assert detect_auth_header("https://open.bigmodel.cn/api/anthropic") == "authorization"
+
+    def test_evil_subpath_not_anthropic(self):
+        """Substring in path must not trigger x-api-key detection."""
+        assert detect_auth_header("https://evil.com/anthropic.com/proxy") == "authorization"
+
+    def test_anthropic_subdomain(self):
+        assert detect_auth_header("https://api.anthropic.com") == "x-api-key"
 
 
 # ---------------------------------------------------------------------------
@@ -222,7 +230,7 @@ class TestLoadForProfile:
         })
         providers, profile, settings = load_for_profile("cc-1")
         assert settings.background_model == "bg"
-        assert profile.destinations["flash"].provider is providers["p"]
+        assert profile.destinations["flash"].provider_name == "p"
 
     def test_unknown_profile_dies(self, tmp_path, monkeypatch):
         monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
@@ -240,6 +248,40 @@ class TestLoadForProfile:
         })
         with pytest.raises(SystemExit, match="provider 'nonexistent'"):
             load_for_profile("cc-1")
+
+    def test_agent_missing_dies(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+        _write_config(tmp_path, {"claude": {"p": {"base_url": "https://x", "auth": "${K}"}}}, {
+            "cc-1": {"agent": "nope", "longContextThreshold": 1,
+                     "destinations": {"flash": "p,m", "pro": "p,m"}},
+        })
+        with pytest.raises(SystemExit, match="agent 'nope'"):
+            load_for_profile("cc-1")
+
+
+class TestValidateProfiles:
+    def _providers(self):
+        return {"claude": {"p": Provider("p", "https://x", "${K}")}}
+
+    def _profile(self, flash="p,m"):
+        return {"cc-1": RoutingProfile("cc-1", "claude", 1, {
+            "flash": Destination(flash.split(",")[0], flash.split(",")[1]),
+            "pro": Destination("p", "m2"),
+        })}
+
+    def test_valid_passes(self):
+        validate_profiles(self._providers(), self._profile())
+
+    def test_unknown_provider_dies(self):
+        with pytest.raises(SystemExit, match="provider 'q'"):
+            validate_profiles(self._providers(), self._profile("q,m"))
+
+    def test_unknown_agent_dies(self):
+        profiles = {"cc-1": RoutingProfile("cc-1", "codex", 1, {
+            "flash": Destination("p", "m1"), "pro": Destination("p", "m2"),
+        })}
+        with pytest.raises(SystemExit, match="agent 'codex'"):
+            validate_profiles(self._providers(), profiles)
 
 
 class TestLoadDefaultProfile:
