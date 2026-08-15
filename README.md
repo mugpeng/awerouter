@@ -31,16 +31,18 @@ pip install awerouter
 
 ```bash
 # 1. Init config (creates ~/.config/awerouter/{providers,routing}.json)
-awerouter config init
+awerouter init
 
-# 2. Edit providers.json — set your API keys via ${ENV_VAR}
-# 3. Edit routing.json — map flash/pro to your providers/models
+# 2. Interactively add a profile (writes both files, references stay consistent)
+awerouter add
+#    or edit by hand: providers.json for keys (${ENV_VAR}), routing.json for flash/pro
 
-# 4. Start the daemon (profile name optional when only one exists)
-awerouter serve [cc-router-1]
+# 3. Start the daemon (profile name optional when only one exists)
+awerouter serve [cc-router-1]     # shorthand: awerouter cc-router-1
 
-# 5. Point CC at it (in aweswitch or directly)
+# 4. Point CC at it — the serve banner prints both lines below
 export ANTHROPIC_BASE_URL=http://127.0.0.1:20128
+# aweswitch profile env: ANTHROPIC_MODEL=auto, _HAIKU_=flash, _OPUS_=pro
 ```
 
 ## Config
@@ -103,7 +105,12 @@ CC's `/model` picker sets the tier model id (c1/flash / c1/pro / c1/think). awer
 ## Commands
 
 ```bash
+awerouter init                        # create default config (= config init)
+awerouter add                         # interactively add a profile (and new providers)
+awerouter list                        # list profiles (name, agent, flash, pro, threshold)
+awerouter show [PROFILE]              # show one profile or all config (redacted)
 awerouter serve [PROFILE] [--port 20128] [--host 127.0.0.1]
+awerouter <PROFILE>                   # shorthand for serve PROFILE
 awerouter config path | show | edit | init
 awerouter log [--lines 20]
 awerouter stats

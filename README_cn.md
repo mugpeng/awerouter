@@ -31,16 +31,18 @@ pip install awerouter
 
 ```bash
 # 1. 初始化配置（生成 ~/.config/awerouter/{providers,routing}.json）
-awerouter config init
+awerouter init
 
-# 2. 编辑 providers.json — 通过 ${ENV_VAR} 填入密钥
-# 3. 编辑 routing.json — 把 flash/pro 映射到你的 provider/model
+# 2. 交互式添加 profile（自动写入两个文件，保证引用一致）
+awerouter add
+#    或者手改：编辑 providers.json 填密钥（${ENV_VAR}），编辑 routing.json 映射 flash/pro
 
-# 4. 启动 daemon（只有一个 profile 时名字可省）
-awerouter serve [cc-router-1]
+# 3. 启动 daemon（只有一个 profile 时名字可省）
+awerouter serve [cc-router-1]     # 等价简写：awerouter cc-router-1
 
-# 5. 让 CC 指向它（通过 aweswitch 或直接 export）
+# 4. 让 CC 指向它 —— serve 启动横幅会直接打印下面这两行
 export ANTHROPIC_BASE_URL=http://127.0.0.1:20128
+# aweswitch profile 环境变量：ANTHROPIC_MODEL=auto, _HAIKU_=flash, _OPUS_=pro
 ```
 
 ## 配置
@@ -103,7 +105,12 @@ CC 的 `/model` 选择器设置 tier model id（c1/flash / c1/pro / c1/think）�
 ## 命令
 
 ```bash
+awerouter init                        # 创建默认配置（= config init）
+awerouter add                         # 交互式添加 profile（含新 provider）
+awerouter list                        # 列出 profile（名字、agent、flash、pro、阈值）
+awerouter show [PROFILE]              # 查看单个 profile 或全部配置（脱敏）
 awerouter serve [PROFILE] [--port 20128] [--host 127.0.0.1]
+awerouter <PROFILE>                   # serve 的简写
 awerouter config path | show | edit | init
 awerouter log [--lines 20]
 awerouter stats

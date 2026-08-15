@@ -11,6 +11,13 @@ Code-quality hardening pass (no behavior change on the happy path).
 - `config show` now cross-validates routing.json destinations against providers.json, so bad references fail immediately instead of on first request.
 
 ### Added
+- `awerouter init` — top-level alias for `config init`.
+- `awerouter add` — interactive wizard that builds a routing profile step by step, creating any new providers (auth stored as `${VAR}` refs) and keeping the two-file references consistent.
+- `awerouter list` — one-line-per-profile overview (name, agent, flash, pro, threshold).
+- `awerouter show [PROFILE]` — single-profile redacted view (providers it uses + routing entry); without an argument it shows the whole config.
+- `awerouter <PROFILE>` — bare profile name as shorthand for `serve <PROFILE>` (defined commands always win over profile names).
+- `serve` startup banner now prints the ready-to-copy `export ANTHROPIC_BASE_URL=...` line and the tier env vars for the aweswitch profile.
+- `config edit` auto-initializes the default config when missing instead of erroring.
 - Per-request `request_id` (reuses client `x-request-id` when present, otherwise generated) written to the request log and shown by `awerouter log`.
 - Log rotation: the request log rotates to `requests.jsonl.1` when it exceeds `AWEROUTER_LOG_MAX_BYTES` (default 50 MB); `awerouter log` reads from the end of the file instead of loading it whole.
 - `calibrate` output now clarifies the distribution counts message tokens only (system prompt and tools excluded).

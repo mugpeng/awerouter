@@ -250,6 +250,33 @@ def init_config() -> None:
     shutil.copy2(TEMPLATE_ROUTING, routing_path())
 
 
+def save_provider(agent: str, name: str, base_url: str, auth: str) -> None:
+    """Append one provider entry to providers.json."""
+    path = providers_path()
+    data = _load_json(path, "providers.json")
+    group = data.setdefault(agent, {})
+    if name in group:
+        die(f"provider already exists: {agent}.{name}")
+    group[name] = {"base_url": base_url, "auth": auth}
+    path.write_text(json.dumps(data, indent=2) + "\n")
+
+
+def save_profile_entry(
+    name: str, agent: str, long_context_threshold: int, flash: str, pro: str
+) -> None:
+    """Append one profile entry to routing.json. flash/pro are 'provider,model'."""
+    path = routing_path()
+    data = _load_json(path, "routing.json")
+    if name in data:
+        die(f"profile already exists: {name}")
+    data[name] = {
+        "agent": agent,
+        "longContextThreshold": long_context_threshold,
+        "destinations": {"flash": flash, "pro": pro},
+    }
+    path.write_text(json.dumps(data, indent=2) + "\n")
+
+
 # ---------------------------------------------------------------------------
 # Config display
 # ---------------------------------------------------------------------------
@@ -292,7 +319,27 @@ def format_routing_display(settings: Settings, profiles: dict[str, RoutingProfil
 # Click CLI
 # ---------------------------------------------------------------------------
 
+class ProfileGroup(click.Group):
+    """Group where an unknown subcommand is treated as a profile name:
+    `awerouter cc-router-1` == `awerouter serve cc-router-1`.
+
+    Defined commands always win, so profiles named after commands are
+    unreachable via the shorthand (use `serve <name>` for those).
+    """
+
+    def resolve_command(self, ctx, args):
+        try:
+            return super().resolve_command(ctx, args)
+        except click.UsageError:
+            if not args:
+                raise
+            ctx.meta["profile_name"] = args[0]
+            command = self.get_command(ctx, "__serve_profile__")
+            return args[0], command, args[1:]
+
+
 @click.group(
+    cls=ProfileGroup,
     context_settings={"help_option_names": ["-h", "--help"]},
 )
 @click.version_option(__version__, "-v", "--version", message="awerouter %(version)s")
@@ -326,11 +373,11 @@ def config_show_cmd():
 
 @config.command("edit")
 def config_edit_cmd():
-    """Open config dir in $EDITOR."""
+    """Open config dir in $EDITOR (creates default config if missing)."""
     d = config_dir()
     d.mkdir(parents=True, exist_ok=True)
     if not providers_path().exists() or not routing_path().exists():
-        die(f"config not found in {d}\nrun: awerouter config init")
+        init_config()
     editor = os.environ.get("VISUAL") or os.environ.get("EDITOR") or shutil.which("nano")
     if not editor:
         die("no EDITOR set; edit config manually")
@@ -347,6 +394,13 @@ def config_edit_cmd():
 @config.command("init")
 def config_init_cmd():
     """Create default config from templates."""
+    init_config()
+    click.echo(config_dir())
+
+
+@cli.command("init")
+def init_cmd():
+    """Create default config from templates (same as config init)."""
     init_config()
     click.echo(config_dir())
 

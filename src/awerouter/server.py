@@ -332,6 +332,13 @@ async def _serve(host: str, port: int, providers: dict, profile, settings) -> No
     print(f"  bg     -> {settings.background_model}  think -> {settings.think_model}  main -> auto")
     print(f"  flash  -> {profile.destinations['flash'].provider_name}/{profile.destinations['flash'].model}")
     print(f"  pro    -> {profile.destinations['pro'].provider_name}/{profile.destinations['pro'].model}")
+    display_host = "127.0.0.1" if host in ("0.0.0.0", "::") else host
+    print()
+    print("point Claude Code here:")
+    print(f"  export ANTHROPIC_BASE_URL=http://{display_host}:{port}")
+    print(f"  tier env: ANTHROPIC_MODEL=auto  "
+          f"ANTHROPIC_DEFAULT_HAIKU_MODEL={settings.background_model}  "
+          f"ANTHROPIC_DEFAULT_OPUS_MODEL={settings.think_model}")
     try:
         await asyncio.Event().wait()
     except asyncio.CancelledError:

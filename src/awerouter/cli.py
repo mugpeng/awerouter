@@ -1,4 +1,4 @@
-"""CLI commands: serve / log / stats.
+"""CLI commands: serve / add / list / show / log / stats / calibrate.
 
 Imports the click group from config.py and extends it.
 """
@@ -9,8 +9,20 @@ import click
 
 from awerouter.config import (
     cli as config_cli,
+    config_dir,
+    die,
+    format_providers_display,
+    format_routing_display,
+    init_config,
     load_default_profile,
     load_for_profile,
+    load_providers,
+    load_routing,
+    providers_path,
+    routing_path,
+    save_profile_entry,
+    save_provider,
+    validate_profiles,
 )
 from awerouter.server import _serve
 
@@ -18,16 +30,7 @@ from awerouter.server import _serve
 cli = config_cli
 
 
-@cli.command()
-@click.argument("profile", required=False)
-@click.option("--port", default=20128, show_default=True, help="Listen port.")
-@click.option("--host", default="127.0.0.1", show_default=True, help="Bind address.")
-def serve(profile: str | None, port: int, host: str):
-    """Start the awerouter daemon for PROFILE.
-
-    PROFILE is a profile id from routing.json. If omitted, auto-selects when only
-    one profile exists.
-    """
+def _run_serve(profile, port: int, host: str) -> None:
     if profile:
         providers, routing, settings = load_for_profile(profile)
     else:
@@ -36,6 +39,110 @@ def serve(profile: str | None, port: int, host: str):
         asyncio.run(_serve(host, port, providers, routing, settings))
     except KeyboardInterrupt:
         raise SystemExit(0)
+
+
+@cli.command()
+@click.argument("profile", required=False)
+@click.option("--port", default=20128, show_default=True, help="Listen port.")
+@click.option("--host", default="127.0.0.1", show_default=True, help="Bind address.")
+def serve(profile, port: int, host: str):
+    """Start the awerouter daemon for PROFILE.
+
+    PROFILE is a profile id from routing.json. If omitted, auto-selects when only
+    one profile exists.
+    """
+    _run_serve(profile, port, host)
+
+
+@click.command("__serve_profile__", hidden=True)
+@click.option("--port", default=20128, show_default=True, help="Listen port.")
+@click.option("--host", default="127.0.0.1", show_default=True, help="Bind address.")
+@click.pass_context
+def _serve_profile(ctx, port: int, host: str):
+    """Bare profile launch: `awerouter <profile>` == `awerouter serve <profile>`."""
+    _run_serve(ctx.meta["profile_name"], port, host)
+
+
+cli.add_command(_serve_profile)
+
+
+@cli.command("add")
+def add():
+    """Interactively add a routing profile (creates any new providers)."""
+    if not providers_path().exists() or not routing_path().exists():
+        init_config()
+        click.echo(f"initialized config in {config_dir()}")
+    providers_all = load_providers()
+    _, profiles = load_routing()
+
+    name = click.prompt("Profile name")
+    if name in profiles:
+        die(f"profile already exists: {name}")
+    agent = click.prompt("Agent group (providers.json key)", default="claude")
+    known = set(providers_all.get(agent, {}))
+
+    def ask_tier(tier: str) -> str:
+        hint = ", ".join(sorted(known)) or "none yet"
+        pname = click.prompt(f"{tier} provider ({hint})")
+        if pname not in known:
+            base_url = click.prompt(f"  {pname} base_url")
+            auth_var = click.prompt(f"  {pname} auth env var name (stored as ${{VAR}})")
+            save_provider(agent, pname, base_url, f"${{{auth_var}}}")
+            known.add(pname)
+        model = click.prompt(f"{tier} model id")
+        return f"{pname},{model}"
+
+    flash = ask_tier("flash")
+    pro = ask_tier("pro")
+    threshold = click.prompt("longContextThreshold", default=8000, type=int)
+    save_profile_entry(name, agent, threshold, flash, pro)
+
+    # Fail loudly if the wizard wrote something inconsistent.
+    validate_profiles(load_providers(), load_routing()[1])
+    click.echo(f"Profile '{name}' added: flash={flash}  pro={pro}  L3>{threshold}")
+    click.echo(f"Start it with: awerouter {name}")
+
+
+@cli.command("list")
+def list_profiles():
+    """List routing profiles (name, agent, flash, pro, threshold)."""
+    providers_all = load_providers()
+    _, profiles = load_routing()
+    validate_profiles(providers_all, profiles)
+    for name, p in profiles.items():
+        flash = p.destinations["flash"]
+        pro = p.destinations["pro"]
+        click.echo(
+            f"{name}\t{p.agent}\t{flash.provider_name}/{flash.model}"
+            f"\t{pro.provider_name}/{pro.model}\tL3>{p.long_context_threshold}"
+        )
+
+
+@cli.command()
+@click.argument("profile", required=False)
+def show(profile):
+    """Show PROFILE (or the whole config) with secrets redacted."""
+    providers_all = load_providers()
+    settings, profiles = load_routing()
+    validate_profiles(providers_all, profiles)
+    if not profile:
+        click.echo("providers.json:")
+        click.echo(format_providers_display(providers_all))
+        click.echo()
+        click.echo("routing.json:")
+        click.echo(format_routing_display(settings, profiles))
+        return
+    if profile not in profiles:
+        avail = ", ".join(profiles) or "(none)"
+        die(f"profile '{profile}' not found in routing.json; available: {avail}")
+    p = profiles[profile]
+    used = {d.provider_name: providers_all[p.agent][d.provider_name]
+            for d in p.destinations.values()}
+    click.echo("providers:")
+    click.echo(format_providers_display({p.agent: used}))
+    click.echo()
+    click.echo("profile:")
+    click.echo(format_routing_display(settings, {profile: p}))
 
 
 @cli.command()

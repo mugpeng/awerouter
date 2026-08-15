@@ -1,0 +1,148 @@
+"""Tests for awerouter.cli top-level commands."""
+
+import json
+
+from click.testing import CliRunner
+
+from awerouter.cli import cli
+from awerouter.config import load_for_profile
+
+
+def _setup(tmp_path, monkeypatch, providers=None, routing=None):
+    monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+    if providers is not None:
+        (tmp_path / "providers.json").write_text(json.dumps(providers))
+    if routing is not None:
+        (tmp_path / "routing.json").write_text(json.dumps(routing))
+
+
+def _providers():
+    return {"claude": {
+        "stepfun": {"base_url": "https://api.stepfun.com/step_plan", "auth": "${K1}"},
+        "anthropic": {"base_url": "https://api.anthropic.com", "auth": "${K2}"},
+    }}
+
+
+def _routing():
+    return {
+        "cc-1": {"agent": "claude", "longContextThreshold": 8000,
+                 "destinations": {"flash": "stepfun,sf-flash", "pro": "anthropic,opus"}},
+        "cc-2": {"agent": "claude", "longContextThreshold": 4000,
+                 "destinations": {"flash": "stepfun,sf-flash", "pro": "stepfun,sf-pro"}},
+    }
+
+
+class TestInit:
+    def test_top_level_init_creates_both_files(self, tmp_path, monkeypatch):
+        _setup(tmp_path, monkeypatch)
+        r = CliRunner().invoke(cli, ["init"])
+        assert r.exit_code == 0
+        assert (tmp_path / "providers.json").exists()
+        assert (tmp_path / "routing.json").exists()
+
+    def test_top_level_init_refuses_existing(self, tmp_path, monkeypatch):
+        _setup(tmp_path, monkeypatch)
+        CliRunner().invoke(cli, ["init"])
+        r = CliRunner().invoke(cli, ["init"])
+        assert r.exit_code != 0
+        assert "already exists" in r.output
+
+
+class TestList:
+    def test_lists_profiles(self, tmp_path, monkeypatch):
+        _setup(tmp_path, monkeypatch, _providers(), _routing())
+        r = CliRunner().invoke(cli, ["list"])
+        assert r.exit_code == 0
+        lines = r.output.splitlines()
+        assert any(l.startswith("cc-1\tclaude\tstepfun/sf-flash\tanthropic/opus\tL3>8000") for l in lines)
+        assert any(l.startswith("cc-2\tclaude\tstepfun/sf-flash\tstepfun/sf-pro\tL3>4000") for l in lines)
+
+
+class TestShow:
+    def test_show_all_without_arg(self, tmp_path, monkeypatch):
+        _setup(tmp_path, monkeypatch, _providers(), _routing())
+        r = CliRunner().invoke(cli, ["show"])
+        assert r.exit_code == 0
+        assert "providers.json" in r.output
+        assert "cc-1" in r.output
+
+    def test_show_single_profile(self, tmp_path, monkeypatch):
+        _setup(tmp_path, monkeypatch, _providers(), _routing())
+        r = CliRunner().invoke(cli, ["show", "cc-1"])
+        assert r.exit_code == 0
+        assert "stepfun/sf-flash" in r.output or "sf-flash" in r.output
+        assert "cc-2" not in r.output.replace("available", "")  # other profile not shown
+
+    def test_show_unknown_profile_dies(self, tmp_path, monkeypatch):
+        _setup(tmp_path, monkeypatch, _providers(), _routing())
+        r = CliRunner().invoke(cli, ["show", "nope"])
+        assert r.exit_code != 0
+        assert "not found" in r.output
+
+
+class TestAdd:
+    def test_wizard_new_and_existing_provider(self, tmp_path, monkeypatch):
+        _setup(tmp_path, monkeypatch, _providers(), _routing())
+        answers = "\n".join([
+            "cc-3",                    # profile name
+            "",                        # agent (default claude)
+            "newprov",                 # flash provider (new)
+            "https://api.newprov.com",  #   base_url
+            "NEWPROV_KEY",             #   auth env var
+            "nv-flash",                #   flash model
+            "anthropic",               # pro provider (existing)
+            "opus-9",                  #   pro model
+            "",                        # threshold (default 8000)
+        ]) + "\n"
+        r = CliRunner().invoke(cli, ["add"], input=answers)
+        assert r.exit_code == 0, r.output
+        assert "Profile 'cc-3' added" in r.output
+
+        providers = json.loads((tmp_path / "providers.json").read_text())
+        assert providers["claude"]["newprov"]["base_url"] == "https://api.newprov.com"
+        assert providers["claude"]["newprov"]["auth"] == "${NEWPROV_KEY}"
+        # existing provider untouched
+        assert providers["claude"]["anthropic"]["auth"] == "${K2}"
+
+        routing = json.loads((tmp_path / "routing.json").read_text())
+        assert routing["cc-3"]["destinations"]["flash"] == "newprov,nv-flash"
+        assert routing["cc-3"]["destinations"]["pro"] == "anthropic,opus-9"
+
+        # the wizard result must actually serve
+        _, profile, _ = load_for_profile("cc-3")
+        assert profile.destinations["pro"].model == "opus-9"
+
+    def test_wizard_auto_inits_missing_config(self, tmp_path, monkeypatch):
+        _setup(tmp_path, monkeypatch)  # no config files
+        answers = "\n".join([
+            "cc-1", "", "newprov", "https://x", "K", "m1", "newprov", "m2", "",
+        ]) + "\n"
+        r = CliRunner().invoke(cli, ["add"], input=answers)
+        assert r.exit_code == 0, r.output
+        assert (tmp_path / "routing.json").exists()
+
+    def test_wizard_duplicate_profile_dies(self, tmp_path, monkeypatch):
+        _setup(tmp_path, monkeypatch, _providers(), _routing())
+        answers = "cc-1\n"
+        r = CliRunner().invoke(cli, ["add"], input=answers)
+        assert r.exit_code != 0
+        assert "already exists" in r.output
+
+
+class TestBareProfileLaunch:
+    def test_unknown_subcommand_resolves_to_profile(self, tmp_path, monkeypatch):
+        _setup(tmp_path, monkeypatch, _providers(), _routing())
+        calls = []
+        monkeypatch.setattr("awerouter.cli._run_serve", lambda p, port, host: calls.append((p, port, host)))
+        r = CliRunner().invoke(cli, ["cc-1", "--port", "20999"])
+        assert r.exit_code == 0, r.output
+        assert calls == [("cc-1", 20999, "127.0.0.1")]
+
+    def test_defined_command_wins(self, tmp_path, monkeypatch):
+        """A command name is never treated as a profile name."""
+        _setup(tmp_path, monkeypatch, _providers(), _routing())
+        calls = []
+        monkeypatch.setattr("awerouter.cli._run_serve", lambda p, port, host: calls.append((p, port, host)))
+        r = CliRunner().invoke(cli, ["list"])
+        assert r.exit_code == 0
+        assert calls == []  # list ran, serve never did
