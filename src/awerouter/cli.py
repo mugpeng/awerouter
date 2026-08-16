@@ -9,6 +9,7 @@ import shutil
 import click
 
 from awerouter.config import (
+    DEFAULT_PORT,
     SuggestGroup,
     backup_path,
     cli as config_cli,
@@ -30,8 +31,6 @@ from awerouter.server import _serve
 
 # Attach config sub-group to the main cli group
 cli = config_cli
-
-DEFAULT_PORT = 20128
 
 
 def _resolve_port(cli_port, profile) -> tuple[int, bool]:

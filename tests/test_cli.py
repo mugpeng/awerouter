@@ -226,12 +226,15 @@ class TestAdd:
 
 class TestUsage:
     def _seed_log(self, tmp_path, monkeypatch):
+        from datetime import datetime, timezone
         from awerouter.logging import append
         from awerouter.types import RequestLog
         log_dir = tmp_path / "logs"
         monkeypatch.setenv("AWEROUTER_LOG_DIR", str(log_dir))
+        # Seed "now" so --since today always includes the entry, whenever the
+        # suite runs (a fixed date falls out of the window the next day).
         append(RequestLog(
-            ts="2026-08-16T00:00:00+00:00", request_id="r1", model_in="auto",
+            ts=datetime.now(timezone.utc).isoformat(), request_id="r1", model_in="auto",
             label="default", destination="flash", provider="stepfun",
             model_out="sf-flash", status=200, ms=800, duration_ms=1500, bytes=100,
             token_count=120, profile="cc-1", protocol="anthropic", agent="claude-code",
@@ -301,8 +304,6 @@ class TestUsage:
         self._seed_log(tmp_path, monkeypatch)
         r = CliRunner().invoke(cli, ["usage", "stats", "--since", "today"])
         assert r.exit_code == 0, r.output
-        # entry ts is 2026-08-16 UTC midnight; depending on local tz it may fall
-        # inside or before today's window — either way the window line prints
         assert "window" in r.output
 
     def test_group_rejects_window_options(self, tmp_path, monkeypatch):

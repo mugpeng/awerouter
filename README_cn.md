@@ -189,7 +189,7 @@ aweswitch oc-awerouter
 
 > **基于 profile 的路由：** `routing.json` 用 profile id 分组（类似 aweswitch）。`awerouter serve <profile>` 启动其中一个；只有一个 profile 时自动选择。`protocol` 字段把 profile 映射到 providers.json 的分组，并决定它服务哪个端点——serve 横幅按协议打印对应客户端的环境变量（anthropic → Claude Code 的 `ANTHROPIC_BASE_URL`；openai 协议 → `OPENAI_BASE_URL` / Codex `wire_api`）。注意：openai 客户端是单 model 配置，L2 档位匹配基本不触发——openai 流量走 L1 + L3，默认 flash。
 
-> **每个 profile 固定端口：** 可选的 `port` 字段为 profile 固定监听端口（`awerouter list` 会显示），客户端 base URL 从此不会因重启而失效。优先级：`--port` 参数 > profile `port` > 默认 20128。显式指定的端口被占用时会直接报错退出，不再悄悄漂到随机端口——只有未配置任何端口的默认 20128 保留随机回退。
+> **端口分配：** 可选的 `port` 字段为 profile 固定监听端口（`awerouter list` 会显示）；优先级：`--port` 参数 > profile `port` > 默认 20128。显式指定的端口被占用时直接报错退出——客户端写死了它，不能悄悄漂移。不配置端口时，serve 从 20128 起向上找第一个空闲端口：第一个实例拿 20128，下一个 20129，依次顺延——按启动顺序分配，与 profile 无关。一次只跑一个实例的热切换用法：profile 不配端口、客户端固定指向 20128 即可。
 
 ## 路由逻辑
 

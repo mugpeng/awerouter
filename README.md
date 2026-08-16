@@ -189,7 +189,7 @@ Keys reference `${ENV_VAR}` syntax. Missing env vars die with a clear message at
 
 > **Profile-based routing:** `routing.json` groups configs under profile ids (like aweswitch). `awerouter serve <profile>` starts one; with a single profile it auto-selects. `protocol` maps the profile to a providers.json group and decides which endpoint it serves — the serve banner prints the matching client env (`ANTHROPIC_BASE_URL` for Claude Code, `OPENAI_BASE_URL` / Codex `wire_api` for the openai protocols). Note: openai clients are single-model, so L2 tier labels effectively never fire for them — openai traffic routes by L1 + L3 with a flash default.
 
-> **Fixed port per profile:** the optional `port` field pins a profile's listen port (`awerouter list` shows it), so client base URLs never go stale across restarts. Precedence: `--port` flag > profile `port` > 20128 default. An explicitly chosen port that is already in use fails loudly instead of silently drifting to a random port — only the implicit 20128 default keeps the random fallback.
+> **Ports:** the optional `port` field pins a profile's listen port (`awerouter list` shows it); precedence: `--port` flag > profile `port` > 20128 default. An explicitly chosen port that is already in use fails loudly — clients hardcode it, it must not silently move. Without one, serve takes the first free port scanning up from 20128: the first instance gets 20128, the next 20129, and so on — the assignment follows start order, not the profile. For the one-instance-at-a-time swap workflow, leave profiles portless and point clients at 20128.
 
 ## How It Routes
 

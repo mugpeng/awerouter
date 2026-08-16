@@ -21,6 +21,9 @@ from awerouter.types import Destination, Provider, RoutingProfile, Settings
 ENV_REF_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 SECRET_RE = re.compile(r"(TOKEN|KEY|SECRET|PASSWORD|AUTH)", re.IGNORECASE)
 
+# Implicit listen port: the first serve instance takes it, later ones scan up.
+DEFAULT_PORT = 20128
+
 TEMPLATE_PROVIDERS = Path(__file__).parent / "default-providers.json"
 TEMPLATE_ROUTING = Path(__file__).parent / "default-routing.json"
 
