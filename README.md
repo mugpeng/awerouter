@@ -139,7 +139,7 @@ awerouter savings
 
 `calibrate` shows the message-token distribution of L3 traffic (the threshold-sensitive layer; messages only — system prompt and tools are excluded) and suggests candidate `longContextThreshold` values at p90/p95/p99. Run it after some real traffic, then edit `routing.json`.
 
-`savings` is the token accounting view: how many message-input tokens each tier consumed and how many pro input tokens routing offloaded to flash vs a pro-only baseline. It deliberately shows tokens only — multiply by your providers' input prices yourself for a money estimate (output tokens, cache effects, and capability-mismatch turns are not modeled).
+`savings` is the token accounting view: how many message-input tokens each tier consumed and how many pro input tokens routing offloaded to flash vs a pro-only baseline. A cache-sensitivity section brackets the offload between "all cache reads" and "all full price" (Anthropic-style ~0.1x read / 1.25x write / 5-min TTL) and shows your switch cadence vs the TTL — a cache-warm pro-only baseline would have billed those tokens at cache-read prices. Tokens only by design; multiply by your providers' input prices yourself (output tokens, flash-side caching, and capability-mismatch turns are not modeled).
 
 ## Troubleshooting
 

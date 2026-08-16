@@ -38,15 +38,15 @@ class TestSavings:
         from awerouter.types import RequestLog
         log_dir = tmp_path / "logs"
         monkeypatch.setenv("AWEROUTER_LOG_DIR", str(log_dir))
-        append(RequestLog(ts="t1", request_id="r1", model_in="auto", label="default",
-                          destination="flash", provider="p", model_out="m", status=200,
-                          ms=1, bytes=1, token_count=100, profile="cc-1"))
-        append(RequestLog(ts="t2", request_id="r2", model_in="pro", label="think",
-                          destination="pro", provider="p", model_out="m", status=200,
-                          ms=1, bytes=1, token_count=30, profile="cc-1"))
-        append(RequestLog(ts="t3", request_id="r3", model_in="auto", label="default→fallback",
-                          destination="pro", provider="p", model_out="m", status=200,
-                          ms=1, bytes=1, token_count=20, profile="cc-1"))
+        append(RequestLog(ts="2026-01-01T00:00:00+00:00", request_id="r1", model_in="auto",
+                          label="default", destination="flash", provider="p", model_out="m",
+                          status=200, ms=1, bytes=1, token_count=100, profile="cc-1"))
+        append(RequestLog(ts="2026-01-01T00:01:00+00:00", request_id="r2", model_in="pro",
+                          label="think", destination="pro", provider="p", model_out="m",
+                          status=200, ms=1, bytes=1, token_count=30, profile="cc-1"))
+        append(RequestLog(ts="2026-01-01T00:12:00+00:00", request_id="r3", model_in="auto",
+                          label="default→fallback", destination="pro", provider="p", model_out="m",
+                          status=200, ms=1, bytes=1, token_count=20, profile="cc-1"))
 
     def test_no_logs(self, tmp_path, monkeypatch):
         _setup(tmp_path, monkeypatch)
@@ -67,6 +67,10 @@ class TestSavings:
         assert any(l.strip().startswith("total") and "150" in l for l in lines)
         assert "offloaded to flash 100  (67% of input tokens)" in r.output
         assert "150 → 50" in r.output
+        assert "cache sensitivity" in r.output
+        assert "alternations: 1" in r.output
+        assert "consecutive-pro gaps: 1 (0 within TTL, 1 expired)" in r.output
+        assert "offload worth 10–100 pro-equivalent input tokens" in r.output
         assert "money saved" in r.output
 
 

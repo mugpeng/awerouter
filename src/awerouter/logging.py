@@ -7,6 +7,9 @@ from pathlib import Path
 
 from awerouter.types import RequestLog
 
+# Anthropic-style prompt-cache TTL; gaps longer than this expire the prefix cache.
+_CACHE_TTL_S = 300
+
 
 def _log_file() -> Path:
     """Resolve log file path on each call (AWEROUTER_LOG_DIR is live-readable)."""
@@ -138,6 +141,52 @@ def token_totals() -> dict:
     if not (out["flash"]["requests"] or out["pro"]["requests"]):
         return {}
     return out
+
+
+def cadence() -> dict:
+    """Switch cadence vs cache TTL, for the savings cache-sensitivity view.
+
+    Anthropic-style prompt caches live ~5 minutes. The cost of interleaving
+    flash traffic depends on whether pro requests stay within that window:
+    gaps <= TTL mean the pro prefix cache survives; expired gaps mean the
+    next pro request re-warms it at cache-write price.
+    """
+    f = _log_file()
+    if not f.exists():
+        return {}
+    rows = []
+    for line in f.read_text(encoding="utf-8").splitlines():
+        if not line:
+            continue
+        try:
+            data = json.loads(line)
+            ts = datetime.fromisoformat(data["ts"])
+        except (json.JSONDecodeError, KeyError, ValueError):
+            continue
+        rows.append((ts, data.get("destination", "")))
+    rows.sort()
+    if not rows:
+        return {}
+
+    def gaps(times):
+        return [(times[i] - times[i - 1]).total_seconds() for i in range(1, len(times))]
+
+    ttl = _CACHE_TTL_S
+    all_gaps = gaps([t for t, _ in rows])
+    pro_gaps = gaps([t for t, d in rows if d == "pro"])
+    return {
+        "requests": len(rows),
+        "ttl_s": ttl,
+        "alternations": sum(
+            1 for i in range(1, len(rows)) if rows[i][1] != rows[i - 1][1]
+        ),
+        "pro_gaps": len(pro_gaps),
+        "pro_gaps_expired": sum(1 for g in pro_gaps if g > ttl),
+        # In a pro-only world every request hits pro, so expired gaps between
+        # *all* requests are the re-warm points of that baseline.
+        "all_gaps": len(all_gaps),
+        "all_gaps_expired": sum(1 for g in all_gaps if g > ttl),
+    }
 
 
 def _new_profile_bucket() -> dict:

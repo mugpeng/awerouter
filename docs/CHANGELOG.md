@@ -5,6 +5,7 @@
 ### Added
 - `stats` rework: `~total_tokens` (estimated input message tokens) replaces the meaningless `total_bytes`; new `by_model` breakdown, error and fallback counts, per-destination latency p50/p95, and percentages on all breakdowns. `--since today|yesterday|Nd|YYYY-MM-DD` and `--profile NAME` window filters (entries with unparseable timestamps are excluded while filtering); `stats --clean` deletes the saved request log and its rotated backup after a confirmation prompt.
 - `savings` command: token accounting vs a pro-only baseline — message-input tokens per tier (with per-request averages), pro input tokens offloaded to flash, fallback count, and the offload share. Tokens only by design; no prices in config (multiply by your providers' input prices yourself).
+- `savings` cache sensitivity: brackets the offload between "all cache reads" (~0.1x) and "all full price" (1x) under Anthropic-style cache economics (write ~1.25x, TTL 5 min), and reports switch cadence vs the TTL (flash<->pro alternations, consecutive-pro gaps, expired gaps) so users can judge how much a cache-warm pro-only baseline would have discounted the naive number.
 
 ## v0.2.5 - 2026-08-16
 

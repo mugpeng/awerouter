@@ -281,15 +281,23 @@ def calibrate():
         click.echo(f"  {c['threshold']:>7}   → {c['flash_pct']}% flash, {100 - c['flash_pct']}% pro")
 
 
+# Anthropic-style cache economics for the savings bracket (price multipliers,
+# not prices — users apply their own per-token prices).
+_CACHE_READ_FACTOR = 0.1
+_CACHE_WRITE_FACTOR = 1.25
+
+
 @cli.command()
 def savings():
     """Estimate token savings vs a pro-only setup (token view, no prices).
 
-    Shows how many message-input tokens each tier consumed and how many pro
-    input tokens routing offloaded to flash. Multiply by your providers' input
-    prices yourself for a money estimate.
+    Shows how many message-input tokens each tier consumed, how many pro
+    input tokens routing offloaded to flash, and a cache-sensitivity bracket:
+    offloaded tokens are worth less when a pro-only baseline would have
+    served them as cache reads. Multiply by your providers' input prices
+    yourself for a money estimate.
     """
-    from awerouter.logging import token_totals
+    from awerouter.logging import cadence, token_totals
     t = token_totals()
     if not t:
         click.echo("(no logs yet)")
@@ -312,9 +320,24 @@ def savings():
     click.echo("vs a pro-only setup:")
     click.echo(f"  pro input billed   {total_tok:,} → {pro['tokens']:,}")
     click.echo(f"  offloaded to flash {offloaded:,}  ({pct_tok}% of input tokens)")
+
+    c = cadence()
+    if c and c["requests"] > 1 and offloaded:
+        lower = round(offloaded * _CACHE_READ_FACTOR)
+        click.echo()
+        click.echo(f"cache sensitivity (Anthropic-style: read ~{_CACHE_READ_FACTOR:.0%}, "
+                   f"write ~{_CACHE_WRITE_FACTOR:.0%}, TTL {c['ttl_s'] // 60} min):")
+        click.echo(f"  flash<->pro alternations: {c['alternations']}")
+        click.echo(f"  consecutive-pro gaps: {c['pro_gaps']} "
+                   f"({c['pro_gaps'] - c['pro_gaps_expired']} within TTL, {c['pro_gaps_expired']} expired)")
+        click.echo(f"  all-request gaps expired: {c['all_gaps_expired']}/{c['all_gaps']}"
+                   "  (each would re-warm pro's cache in a pro-only world)")
+        click.echo(f"  offload worth {lower:,}–{offloaded:,} pro-equivalent input tokens")
+        click.echo("  (lower = all would have been cache reads; a cache-warm pro-only baseline sits near it)")
+
     click.echo()
-    click.echo("money saved ≈ offloaded × (pro − flash input price per token)")
-    click.echo("cache effects and extra turns from capability mismatch are not modeled")
+    click.echo("money saved ≈ effective-offloaded × (pro − flash input price per token)")
+    click.echo("flash-side caching and capability-mismatch turns are not modeled")
 
 
 def main(argv=None):

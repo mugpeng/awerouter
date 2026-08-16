@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from awerouter.logging import clear_logs, stats, tail, token_distribution, token_totals
+from awerouter.logging import cadence, clear_logs, stats, tail, token_distribution, token_totals
 from awerouter.types import RequestLog
 
 
@@ -44,6 +44,31 @@ class TestTokenTotals:
         from awerouter.logging import append
         append(_log("t1", "default", 10, destination="weird"))
         assert token_totals() == {}
+
+
+class TestCadence:
+    def test_empty(self, _log_dir):
+        assert cadence() == {}
+
+    def test_alternations_and_ttl_gaps(self, _log_dir):
+        from awerouter.logging import append
+        # pro at t0, pro at t+60s (within TTL), flash at t+120s, pro at t+600s (expired)
+        append(_log("2026-01-01T00:00:00+00:00", "default", 10, "pro"))
+        append(_log("2026-01-01T00:01:00+00:00", "default", 10, "pro"))
+        append(_log("2026-01-01T00:02:00+00:00", "default", 10, "flash"))
+        append(_log("2026-01-01T00:12:00+00:00", "default", 10, "pro"))
+        c = cadence()
+        assert c["requests"] == 4
+        assert c["alternations"] == 2          # pro->flash, flash->pro
+        assert c["pro_gaps"] == 2              # 60s (within) + 600s (expired)
+        assert c["pro_gaps_expired"] == 1
+        assert c["all_gaps"] == 3
+        assert c["all_gaps_expired"] == 1
+
+    def test_skips_bad_timestamps(self, _log_dir):
+        from awerouter.logging import append
+        append(_log("t1", "default", 10, "flash"))  # not ISO — skipped
+        assert cadence() == {}
 
 
 class TestStats:
