@@ -12,6 +12,10 @@ This document is for AI coding agents. Help the user install and configure `awer
 
 **Never run `awerouter serve` inside this agent.** It starts a long-lived proxy session. Always tell the user to run it in their own terminal.
 
+You may run these read-only or non-interactive commands: `awerouter init`, `awerouter config path`, `awerouter config show`, `awerouter config edit`, `awerouter list`, `awerouter show [PROFILE]`, `awerouter usage stats`, `awerouter usage tail`, `awerouter usage calibrate`, `awerouter usage savings`.
+
+Do not run `awerouter add` inside the agent — it is interactive and would block the session.
+
 ## Step 1: Install awerouter CLI
 
 ### Prerequisites

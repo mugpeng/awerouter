@@ -25,6 +25,15 @@
 
 > Transparent proxy that splits coding-agent traffic across providers by cost and capability. Same-protocol passthrough — no translation.
 
+## Support Tools
+
+awerouter works best alongside two companion tools:
+
+- **[aweskill](https://aweskill.webioinfo.top/)** — CLI skill package manager for AI agents. Installs the awerouter skill so your agent can manage routing in natural language.
+- **[aweswitch](https://github.com/Webioinfo01/aweswitch)** — Agent profile switcher. Launches Claude Code, Codex, or OpenCode sessions with a profile that points `BASE_URL` at the awerouter daemon.
+
+aweskill lets the agent **manage** routing; aweswitch lets you **launch** sessions through it. Configure awerouter once, then start any agent against it with `aweswitch <profile>`.
+
 ## Install
 
 ```bash
@@ -66,7 +75,7 @@ The agent will install the CLI, init config, help you add profiles, and install 
 > "Tune longContextThreshold from my usage."
 > "Explain my usage savings."
 
-The agent can run read-only commands (`list`, `show`, `config show`, `usage stats`, `usage calibrate`, `usage savings`) and edit config, but it will not run `awerouter serve` — that starts a long-lived daemon. Start the daemon in your own terminal:
+The agent can run read-only commands (`list`, `show`, `config show`, `usage stats`, `usage calibrate`, `usage savings`) and edit config directly, but it will **not** run `awerouter serve` — that would start a long-lived daemon inside the agent. To start the daemon, run it in your own terminal:
 
 ```bash
 awerouter serve cc-router-1
@@ -82,6 +91,43 @@ Install the [awerouter skill](https://github.com/mugpeng/awerouter/blob/main/res
 - Guide environment-variable setup for `${ENV_VAR}` auth references
 
 After install, you can tell the agent things like "Add a GLM provider for the openai-chat group", "Raise longContextThreshold to 12000", or "Show me which provider handles my web_search traffic". The agent reads the config, makes changes, and verifies with `awerouter config show` / `awerouter list`.
+
+### Launch through aweswitch
+
+Once awerouter is configured, launch any agent through it by pointing an aweswitch profile at the daemon.
+
+**Example: launch OpenCode through awerouter**
+
+Start the daemon with an openai-chat profile in one terminal:
+
+```bash
+awerouter serve oc-router-1
+```
+
+Add an aweswitch OpenCode profile pointing at it:
+
+```json
+{
+  "profiles": {
+    "opencode": {
+      "oc-awerouter": {
+        "env": {
+          "OPENCODE_BASE_URL": "http://127.0.0.1:20128/v1",
+          "OPENCODE_API_KEY": "sk-any-non-empty-value",
+          "OPENCODE_NAME": "awerouter",
+          "OPENCODE_MODEL": "auto"
+        }
+      }
+    }
+  }
+}
+```
+
+```bash
+aweswitch oc-awerouter
+```
+
+With `OPENCODE_MODEL` set to `auto`, awerouter routes each request by structural signals — the upstream provider receives the actual model id from `routing.json` destinations, not `auto`. Claude Code works the same way via an `anthropic` profile (`ANTHROPIC_MODEL=auto`).
 
 ## Config
 

@@ -103,7 +103,7 @@ awerouter evaluates requests in first-match-wins order:
 
 | Layer | Signal | Result |
 |-------|--------|--------|
-| L1 | `web_search` tool present | pro |
+| L1 | `web_search` tool present | `settings.webSearchModel` (default pro) |
 | L2 | tier model label (`c1/flash`, `c1/think`, or equivalent model mapping) | flash or pro |
 | L3 | long context or image-heavy content | pro if above threshold or image present |
 

@@ -25,6 +25,15 @@
 
 > 按结构信号把编码 agent 流量拆分到不同 provider，省钱不降质。同协议透传，不做协议转换。
 
+## 支持工具
+
+awerouter 与两个配套工具配合最佳：
+
+- **[aweskill](https://aweskill.webioinfo.top/)** — 面向 AI agent 的 CLI skill 包管理器。安装 awerouter skill，让你的 agent 用自然语言管理路由。
+- **[aweswitch](https://github.com/Webioinfo01/aweswitch)** — Agent profile 切换器。用指向 awerouter daemon 的 profile 启动 Claude Code、Codex 或 OpenCode 会话。
+
+aweskill 让 agent **管理**路由；aweswitch 让你**启动**走路由的会话。配置一次 awerouter，之后就能用 `aweswitch <profile>` 把任意 agent 启动到它上面。
+
 ## 安装
 
 ```bash
@@ -66,7 +75,7 @@ Agent 会安装 CLI、初始化配置、帮你添加 profile，并通过 [aweski
 > "根据 usage 帮我调一下 longContextThreshold。"
 > "解释一下我的 usage savings。"
 
-Agent 可以运行只读命令（`list`、`show`、`config show`、`usage stats`、`usage calibrate`、`usage savings`）并编辑配置，但不会运行 `awerouter serve` —— 那会启动一个常驻 daemon。请在你自己的终端启动：
+Agent 可以直接运行只读命令（`list`、`show`、`config show`、`usage stats`、`usage calibrate`、`usage savings`）并编辑配置，但**不会**运行 `awerouter serve` —— 那会在 agent 内部启动一个常驻 daemon。要启动 daemon，请在你自己的终端运行：
 
 ```bash
 awerouter serve cc-router-1
@@ -82,6 +91,43 @@ awerouter serve cc-router-1
 - 引导配置 `${ENV_VAR}` 引用所需的环境变量
 
 安装后你可以直接告诉 agent："给 openai-chat 分组加一个 GLM provider"、"把 longContextThreshold 调到 12000"、"看看我的 web_search 流量走哪个 provider"，agent 会读取配置、做修改、用 `awerouter config show` / `awerouter list` 验证。
+
+### 通过 aweswitch 启动
+
+awerouter 配置好后，用一个指向 daemon 的 aweswitch profile，就能启动走智能路由的编码 agent。
+
+**示例：通过 awerouter 启动 OpenCode**
+
+先在一个终端用 openai-chat profile 启动 daemon：
+
+```bash
+awerouter serve oc-router-1
+```
+
+然后在 aweswitch 配置里加一个指向它的 OpenCode profile：
+
+```json
+{
+  "profiles": {
+    "opencode": {
+      "oc-awerouter": {
+        "env": {
+          "OPENCODE_BASE_URL": "http://127.0.0.1:20128/v1",
+          "OPENCODE_API_KEY": "sk-any-non-empty-value",
+          "OPENCODE_NAME": "awerouter",
+          "OPENCODE_MODEL": "auto"
+        }
+      }
+    }
+  }
+}
+```
+
+```bash
+aweswitch oc-awerouter
+```
+
+`OPENCODE_MODEL` 设为 `auto` 时，awerouter 按结构信号逐请求路由——上游 provider 收到的是 `routing.json` destinations 里配置的实际 model id，而不是 `auto`。Claude Code 同理，用一个 `anthropic` profile（`ANTHROPIC_MODEL=auto`）即可。
 
 ## 配置
 
