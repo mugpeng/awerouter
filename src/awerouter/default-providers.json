@@ -1,9 +1,12 @@
 {
-  "claude": {
+  "anthropic": {
     "stepfun":   { "base_url": "https://api.stepfun.com/step_plan", "auth": "${STEPFUN_AUTH_TOKEN}" },
     "anthropic": { "base_url": "https://api.anthropic.com",          "auth": "${ANTHROPIC_KEY}" }
   },
-  "codex": {
-    "stepfun": { "base_url": "https://api.stepfun.com/v1", "auth": "${STEPFUN_AUTH_TOKEN}" }
+  "openai-chat": {
+    "stepfun": { "base_url": "https://api.stepfun.com", "auth": "${STEPFUN_AUTH_TOKEN}" }
+  },
+  "openai-responses": {
+    "openai": { "base_url": "https://api.openai.com", "auth": "${OPENAI_API_KEY}" }
   }
 }

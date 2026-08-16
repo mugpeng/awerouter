@@ -17,7 +17,7 @@ def _setup(tmp_path, monkeypatch, providers=None, routing=None):
 
 
 def _providers():
-    return {"claude": {
+    return {"anthropic": {
         "stepfun": {"base_url": "https://api.stepfun.com/step_plan", "auth": "${K1}"},
         "anthropic": {"base_url": "https://api.anthropic.com", "auth": "${K2}"},
     }}
@@ -25,9 +25,9 @@ def _providers():
 
 def _routing():
     return {
-        "cc-1": {"agent": "claude", "longContextThreshold": 8000,
+        "cc-1": {"protocol": "anthropic", "longContextThreshold": 8000,
                  "destinations": {"flash": "stepfun,sf-flash", "pro": "anthropic,opus"}},
-        "cc-2": {"agent": "claude", "longContextThreshold": 4000,
+        "cc-2": {"protocol": "anthropic", "longContextThreshold": 4000,
                  "destinations": {"flash": "stepfun,sf-flash", "pro": "stepfun,sf-pro"}},
     }
 
@@ -54,8 +54,8 @@ class TestList:
         r = CliRunner().invoke(cli, ["list"])
         assert r.exit_code == 0
         lines = r.output.splitlines()
-        assert any(l.startswith("cc-1\tclaude\tstepfun/sf-flash\tanthropic/opus\tL3>8000") for l in lines)
-        assert any(l.startswith("cc-2\tclaude\tstepfun/sf-flash\tstepfun/sf-pro\tL3>4000") for l in lines)
+        assert any(l.startswith("cc-1\tanthropic\tstepfun/sf-flash\tanthropic/opus\tL3>8000") for l in lines)
+        assert any(l.startswith("cc-2\tanthropic\tstepfun/sf-flash\tstepfun/sf-pro\tL3>4000") for l in lines)
 
 
 class TestShow:
@@ -85,7 +85,7 @@ class TestAdd:
         _setup(tmp_path, monkeypatch, _providers(), _routing())
         answers = "\n".join([
             "cc-3",                    # profile name
-            "",                        # agent (default claude)
+            "",                        # protocol (default anthropic)
             "newprov",                 # flash provider (new)
             "https://api.newprov.com",  #   base_url
             "NEWPROV_KEY",             #   auth env var
@@ -99,10 +99,10 @@ class TestAdd:
         assert "Profile 'cc-3' added" in r.output
 
         providers = json.loads((tmp_path / "providers.json").read_text())
-        assert providers["claude"]["newprov"]["base_url"] == "https://api.newprov.com"
-        assert providers["claude"]["newprov"]["auth"] == "${NEWPROV_KEY}"
+        assert providers["anthropic"]["newprov"]["base_url"] == "https://api.newprov.com"
+        assert providers["anthropic"]["newprov"]["auth"] == "${NEWPROV_KEY}"
         # existing provider untouched
-        assert providers["claude"]["anthropic"]["auth"] == "${K2}"
+        assert providers["anthropic"]["anthropic"]["auth"] == "${K2}"
 
         routing = json.loads((tmp_path / "routing.json").read_text())
         assert routing["cc-3"]["destinations"]["flash"] == "newprov,nv-flash"

@@ -1,7 +1,7 @@
 <div align="center">
   <h1>awerouter: Smart LLM Router</h1>
   <p><strong>Route cheap/fast tasks to Flash, hard decisions to Pro.</strong></p>
-  <p>Transparent Anthropic proxy that routes Claude Code requests by structural signals — no keyword guessing, no LLM classifier.</p>
+  <p>Transparent same-protocol proxy that routes coding-agent requests by structural signals — no keyword guessing, no LLM classifier. Speaks Anthropic Messages, OpenAI Chat Completions, and OpenAI Responses.</p>
   <p>
     <strong>English</strong> ·
     <a href="./README_cn.md">简体中文</a>
@@ -23,7 +23,7 @@
   </p>
 </div>
 
-> Transparent proxy that splits Claude Code traffic across providers by cost and capability.
+> Transparent proxy that splits coding-agent traffic across providers by cost and capability. Same-protocol passthrough — no translation.
 
 ## Install
 
@@ -53,19 +53,32 @@ export ANTHROPIC_BASE_URL=http://127.0.0.1:20128
 
 Two files in `~/.config/awerouter/` (override with `AWEROUTER_CONFIG_DIR`):
 
-**providers.json** — endpoints + keys, grouped by agent (redacted in `config show`):
+**providers.json** — endpoints + keys, grouped by wire protocol (redacted in `config show`):
 
 ```json
 {
-  "claude": {
+  "anthropic": {
     "stepfun":   { "base_url": "https://api.stepfun.com/step_plan", "auth": "${STEPFUN_AUTH_TOKEN}" },
     "anthropic": { "base_url": "https://api.anthropic.com",          "auth": "${ANTHROPIC_KEY}" }
   },
-  "codex": {
-    "stepfun": { "base_url": "https://api.stepfun.com/v1", "auth": "${STEPFUN_AUTH_TOKEN}" }
+  "openai-chat": {
+    "stepfun": { "base_url": "https://api.stepfun.com", "auth": "${STEPFUN_AUTH_TOKEN}" }
+  },
+  "openai-responses": {
+    "openai": { "base_url": "https://api.openai.com", "auth": "${OPENAI_API_KEY}" }
   }
 }
 ```
+
+Three protocols are supported, each with its own endpoint appended to `base_url`:
+
+| Protocol id         | Endpoint                   | Typical client                              |
+|---------------------|----------------------------|---------------------------------------------|
+| `anthropic`         | `base_url + /v1/messages`  | Claude Code (`ANTHROPIC_BASE_URL`)          |
+| `openai-chat`       | `base_url + /v1/chat/completions` | OpenAI-compatible clients; Codex with `wire_api = "chat"` |
+| `openai-responses`  | `base_url + /v1/responses` | Codex (`wire_api = "responses"`)            |
+
+`base_url` is the prefix before the endpoint path — for openai providers, drop the trailing `/v1`.
 
 The auth header is **auto-detected from `base_url`**: `anthropic.com` → `x-api-key` (bare token); everyone else → `Authorization` (auto-prefixes `Bearer `). No `auth_header` field needed unless the heuristic is wrong.
 
@@ -78,7 +91,7 @@ The auth header is **auto-detected from `base_url`**: `anthropic.com` → `x-api
     "thinkModel": "pro"
   },
   "cc-router-1": {
-    "agent": "claude",
+    "protocol": "anthropic",
     "longContextThreshold": 8000,
     "destinations": {
       "flash": "stepfun,step-3.7-flash",
@@ -92,7 +105,7 @@ The auth header is **auto-detected from `base_url`**: `anthropic.com` → `x-api
 
 Keys reference `${ENV_VAR}` syntax. Missing env vars die with a clear message at startup.
 
-> **Profile-based routing:** `routing.json` groups configs under profile ids (like aweswitch). `awerouter serve <profile>` starts one; with a single profile it auto-selects. `agent` maps the profile to a providers.json group.
+> **Profile-based routing:** `routing.json` groups configs under profile ids (like aweswitch). `awerouter serve <profile>` starts one; with a single profile it auto-selects. `protocol` maps the profile to a providers.json group and decides which endpoint it serves — the serve banner prints the matching client env (`ANTHROPIC_BASE_URL` for Claude Code, `OPENAI_BASE_URL` / Codex `wire_api` for the openai protocols). Note: openai clients are single-model, so L2 tier labels effectively never fire for them — openai traffic routes by L1 + L3 with a flash default.
 
 ## How It Routes
 
@@ -111,7 +124,7 @@ CC's `/model` picker sets the tier model id (c1/flash / c1/pro / c1/think). awer
 ```bash
 awerouter init                        # create default config (= config init)
 awerouter add                         # interactively add a profile (and new providers)
-awerouter list                        # list profiles (name, agent, flash, pro, threshold)
+awerouter list                        # list profiles (name, protocol, flash, pro, threshold)
 awerouter show [PROFILE]              # show one profile or all config (redacted)
 awerouter serve [PROFILE] [--port 20128] [--host 127.0.0.1]
 awerouter <PROFILE>                   # shorthand for serve PROFILE

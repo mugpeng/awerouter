@@ -1,8 +1,9 @@
 """awerouter — smart LLM router daemon.
 
-Routes Claude Code requests to flash (cheap/fast) or pro (strong/accurate)
-providers based on structural request signals. Opaque SSE proxy; no request
-body parsing on the response path.
+Routes coding-agent requests to flash (cheap/fast) or pro (strong/accurate)
+providers based on structural request signals. Same-protocol passthrough
+proxy (anthropic / openai-chat / openai-responses); no translation, no
+request body parsing on the response path.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ from aiohttp import web
 
 from awerouter.config import expand_value
 from awerouter.logging import append, ensure_log_dir
+from awerouter.protocols import ENDPOINT_PATHS, extract
 from awerouter.router import resolve
 from awerouter.types import RequestLog, ResolveResult
 
@@ -94,15 +96,16 @@ async def _proxy_request(
 
 
 # ---------------------------------------------------------------------------
-# Request handler
+# Request handlers
 # ---------------------------------------------------------------------------
 
 
 def _resolve_for_request(body: dict, profile, settings) -> ResolveResult:
-    """Shared routing decision for messages and count_tokens."""
+    """Shared routing decision for all message-shaped endpoints."""
+    feat = extract(profile.protocol, body)
     return resolve(
         body.get("model") or None,
-        body,
+        feat,
         profile.destinations,
         settings.background_model,
         settings.think_model,
@@ -143,16 +146,33 @@ def _log_failure(state: _RoutingState, request_id: str, t0: float, status: int) 
     ))
 
 
-async def handle_messages(request: web.Request) -> web.StreamResponse:
+def _protocol_mismatch(request: web.Request, endpoint_protocol: str) -> web.HTTPBadRequest:
+    profile = request.app["profile"]
+    return web.HTTPBadRequest(
+        text=json.dumps({"error": {"message": (
+            f"profile '{profile.name}' speaks '{profile.protocol}'; "
+            f"this endpoint serves '{endpoint_protocol}'. "
+            "Start a profile of the matching protocol, or point this client elsewhere."
+        )}}),
+        content_type="application/json",
+    )
+
+
+async def _proxy_flow(request: web.Request, endpoint_protocol: str) -> web.StreamResponse:
+    """Generic same-protocol proxy flow: route, forward, retry, stream back, log."""
     providers: dict = request.app["providers"]
     profile = request.app["profile"]
     settings = request.app["settings"]
     session: aiohttp.ClientSession = request.app["session"]
 
+    if profile.protocol != endpoint_protocol:
+        raise _protocol_mismatch(request, endpoint_protocol)
+
     t0 = time.monotonic()
     request_id = request.headers.get("x-request-id") or uuid.uuid4().hex[:12]
     body = await request.json()
     headers = _filter_headers(dict(request.headers))
+    path = ENDPOINT_PATHS[endpoint_protocol]
 
     # Timeout: generous for streaming, tight for non-streaming
     is_stream = body.get("stream", False)
@@ -171,7 +191,7 @@ async def handle_messages(request: web.Request) -> web.StreamResponse:
 
         try:
             up = await _proxy_request(
-                session, state.body, dest, providers, dict(headers), request.path, timeout
+                session, state.body, dest, providers, dict(headers), path, timeout
             )
         except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
             # Network-level failure
@@ -241,6 +261,18 @@ async def handle_messages(request: web.Request) -> web.StreamResponse:
         return resp
 
 
+async def handle_messages(request: web.Request) -> web.StreamResponse:
+    return await _proxy_flow(request, "anthropic")
+
+
+async def handle_chat_completions(request: web.Request) -> web.StreamResponse:
+    return await _proxy_flow(request, "openai-chat")
+
+
+async def handle_responses(request: web.Request) -> web.StreamResponse:
+    return await _proxy_flow(request, "openai-responses")
+
+
 def _fallback_result(state: _RoutingState) -> ResolveResult:
     """Return a new resolve result for the pro fallback."""
     pro_dest = state.profile.destinations["pro"]
@@ -257,6 +289,9 @@ async def handle_count_tokens(request: web.Request) -> web.Response:
     profile = request.app["profile"]
     settings = request.app["settings"]
     session: aiohttp.ClientSession = request.app["session"]
+
+    if profile.protocol != "anthropic":
+        raise _protocol_mismatch(request, "anthropic")
 
     body = await request.json()
     headers = _filter_headers(dict(request.headers))
@@ -301,6 +336,8 @@ async def handle_root(request: web.Request) -> web.Response:
         "endpoints": [
             "POST /v1/messages",
             "POST /v1/messages/count_tokens",
+            "POST /v1/chat/completions",
+            "POST /v1/responses",
             "GET /v1/models",
         ],
     })
@@ -355,6 +392,8 @@ def create_app(providers: dict, profile, settings) -> web.Application:
         web.get("/v1/models", handle_models),
         web.post("/v1/messages", handle_messages),
         web.post("/v1/messages/count_tokens", handle_count_tokens),
+        web.post("/v1/chat/completions", handle_chat_completions),
+        web.post("/v1/responses", handle_responses),
     ])
 
     async def on_cleanup(app):
@@ -369,6 +408,23 @@ def create_app(providers: dict, profile, settings) -> web.Application:
 # ---------------------------------------------------------------------------
 
 
+def _client_hint(protocol: str, display_host: str, port: int, settings) -> str:
+    if protocol == "anthropic":
+        return (
+            "point Claude Code here:\n"
+            f"  export ANTHROPIC_BASE_URL=http://{display_host}:{port}\n"
+            f"  tier env: ANTHROPIC_MODEL=auto  "
+            f"ANTHROPIC_DEFAULT_HAIKU_MODEL={settings.background_model}  "
+            f"ANTHROPIC_DEFAULT_OPUS_MODEL={settings.think_model}"
+        )
+    wire_api = "chat" if protocol == "openai-chat" else "responses"
+    return (
+        "point your OpenAI client here:\n"
+        f"  export OPENAI_BASE_URL=http://{display_host}:{port}\n"
+        f"  codex: set base_url to the same URL in config.toml (wire_api = \"{wire_api}\")"
+    )
+
+
 async def _serve(host: str, port: int, providers: dict, profile, settings) -> None:
     app = create_app(providers, profile, settings)
     runner = web.AppRunner(app)
@@ -376,17 +432,13 @@ async def _serve(host: str, port: int, providers: dict, profile, settings) -> No
     site = web.TCPSite(runner, host=host, port=port)
     await site.start()
     print(f"awerouter listening on {host}:{port}  [{profile.name}]")
-    print(f"  agent  -> {profile.agent}")
+    print(f"  protocol -> {profile.protocol}")
     print(f"  bg     -> {settings.background_model}  think -> {settings.think_model}  main -> auto")
     print(f"  flash  -> {profile.destinations['flash'].provider_name}/{profile.destinations['flash'].model}")
     print(f"  pro    -> {profile.destinations['pro'].provider_name}/{profile.destinations['pro'].model}")
     display_host = "127.0.0.1" if host in ("0.0.0.0", "::") else host
     print()
-    print("point Claude Code here:")
-    print(f"  export ANTHROPIC_BASE_URL=http://{display_host}:{port}")
-    print(f"  tier env: ANTHROPIC_MODEL=auto  "
-          f"ANTHROPIC_DEFAULT_HAIKU_MODEL={settings.background_model}  "
-          f"ANTHROPIC_DEFAULT_OPUS_MODEL={settings.think_model}")
+    print(_client_hint(profile.protocol, display_host, port, settings))
     warning = _loopback_proxy_warning()
     if warning:
         print()

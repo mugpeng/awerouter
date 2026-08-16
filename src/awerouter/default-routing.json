@@ -5,7 +5,7 @@
     "webSearchModel": "pro"
   },
   "cc-router-1": {
-    "agent": "claude",
+    "protocol": "anthropic",
     "longContextThreshold": 8000,
     "destinations": {
       "flash": "stepfun,step-3.7-flash",

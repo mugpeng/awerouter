@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.3.0 - 2026-08-16
+
+Protocol-based provider grouping with same-protocol passthrough for all three major wire protocols.
+
+### Breaking
+- **Config schema**: `providers.json` outer keys are now protocol ids (`anthropic` / `openai-chat` / `openai-responses`) instead of agent names; `routing.json` profiles declare `protocol` instead of `agent`. Old configs fail at load with rename hints (`claude` → `anthropic`, `codex` → `openai-chat` / `openai-responses`).
+- **base_url semantics** for openai providers: prefix before the endpoint path — drop the trailing `/v1` (awerouter appends `/v1/chat/completions` or `/v1/responses` itself).
+
+### Added
+- **OpenAI protocol support, same-protocol passthrough** (no translation): `POST /v1/chat/completions` and `POST /v1/responses` are served alongside `/v1/messages`. The response path stays opaque byte streaming; only request-side signal extraction is per protocol.
+- Per-protocol signal extraction (`protocols.py`): text/image/web_search detection for all three request shapes, including responses-API `input` items (reasoning/function-call items carry no text and are skipped) and builtin `{type: "web_search"}` tools.
+- All endpoints are always mounted; hitting one that doesn't match the profile's protocol returns a clear JSON 400 instead of a bare 404.
+- Serve banner prints per-protocol client hints: `ANTHROPIC_BASE_URL` + tier env for anthropic, `OPENAI_BASE_URL` + Codex `wire_api` for the openai protocols.
+
+### Notes
+- OpenAI clients are single-model (no tier env story like Claude Code), so L2 tier matching effectively never fires for them — openai traffic routes by L1 + L3 with a flash default. Fallback, logging, stats, and calibrate are protocol-agnostic.
+
 ## v0.2.0 - 2026-08-16
 
 Per-profile observability, project support, and release automation.

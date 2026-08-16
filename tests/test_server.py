@@ -14,7 +14,7 @@ from awerouter.types import Destination, Provider, RoutingProfile, Settings
 
 ROUTING = RoutingProfile(
     name="test",
-    agent="claude",
+    protocol="anthropic",
     long_context_threshold=32,
     destinations={
         "flash": Destination("stepfun", "step-3.5-flash"),
@@ -53,6 +53,8 @@ class TestAwerouter:
                 d = await r.json()
                 assert d["name"] == "awerouter"
                 assert "POST /v1/messages" in d["endpoints"]
+                assert "POST /v1/chat/completions" in d["endpoints"]
+                assert "POST /v1/responses" in d["endpoints"]
         run(t())
 
     def test_v1_models(self):
@@ -343,7 +345,7 @@ class TestAwerouter:
             providers = {
                 "dead": Provider("dead", f"http://127.0.0.1:{dead_port}", "k"),
             }
-            profile = RoutingProfile("t", "claude", 32, {
+            profile = RoutingProfile("t", "anthropic", 32, {
                 "flash": Destination("dead", "m1"),
                 "pro": Destination("dead", "m2"),
             })
@@ -357,6 +359,94 @@ class TestAwerouter:
             from awerouter.logging import tail
             entries = tail(5)
             assert any(e.status == 502 for e in entries), entries
+        run(t())
+
+
+class TestOpenAIProtocols:
+    """Same-protocol passthrough for /v1/chat/completions and /v1/responses."""
+
+    def test_chat_completions_routes_and_rewrites_model(self):
+        async def t():
+            async def up(request):
+                body = await request.json()
+                return web.json_response({"model": body["model"]})
+
+            up_app = web.Application()
+            up_app.router.add_post("/v1/chat/completions", up)
+            up_server = TestServer(up_app)
+            await up_server.start_server()
+            try:
+                profile = RoutingProfile("cx", "openai-chat", 32, {
+                    "flash": Destination("stepfun", "sf-flash"),
+                    "pro": Destination("anthropic", "gpt-pro"),
+                })
+                app = create_app(_providers(up_server.port), profile, SETTINGS)
+                async with TestClient(TestServer(app)) as c:
+                    r = await c.post("/v1/chat/completions", json={
+                        "model": "auto",
+                        "messages": [{"role": "user", "content": "hi"}],
+                    })
+                    assert r.status == 200
+                    d = await r.json()
+                    assert d["model"] == "sf-flash"
+            finally:
+                await up_server.close()
+        run(t())
+
+    def test_responses_routes_long_context_to_pro(self):
+        async def t():
+            async def up(request):
+                body = await request.json()
+                return web.json_response({"model": body["model"]})
+
+            up_app = web.Application()
+            up_app.router.add_post("/v1/responses", up)
+            up_server = TestServer(up_app)
+            await up_server.start_server()
+            try:
+                profile = RoutingProfile("cx", "openai-responses", 32, {
+                    "flash": Destination("stepfun", "sf-flash"),
+                    "pro": Destination("anthropic", "gpt-pro"),
+                })
+                app = create_app(_providers(up_server.port), profile, SETTINGS)
+                async with TestClient(TestServer(app)) as c:
+                    r = await c.post("/v1/responses", json={
+                        "model": "auto",
+                        "input": [{"role": "user", "content": "x" * 200}],
+                    })
+                    assert r.status == 200
+                    d = await r.json()
+                    assert d["model"] == "gpt-pro"
+            finally:
+                await up_server.close()
+        run(t())
+
+    def test_protocol_mismatch_returns_clear_400(self):
+        async def t():
+            app = create_app(_providers(0), ROUTING, SETTINGS)  # anthropic profile
+            async with TestClient(TestServer(app)) as c:
+                r = await c.post("/v1/chat/completions", json={
+                    "model": "auto",
+                    "messages": [{"role": "user", "content": "hi"}],
+                })
+                assert r.status == 400
+                d = await r.json()
+                assert "speaks 'anthropic'" in d["error"]["message"]
+        run(t())
+
+    def test_count_tokens_mismatch_returns_clear_400(self):
+        async def t():
+            profile = RoutingProfile("cx", "openai-chat", 32, {
+                "flash": Destination("stepfun", "sf-flash"),
+                "pro": Destination("anthropic", "gpt-pro"),
+            })
+            app = create_app(_providers(0), profile, SETTINGS)
+            async with TestClient(TestServer(app)) as c:
+                r = await c.post("/v1/messages/count_tokens", json={
+                    "model": "auto",
+                    "messages": [{"content": "hi"}],
+                })
+                assert r.status == 400
         run(t())
 
 

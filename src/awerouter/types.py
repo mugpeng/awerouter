@@ -33,7 +33,7 @@ class Settings:
 @dataclass
 class RoutingProfile:
     name: str                       # profile id, e.g. "cc-router-1"
-    agent: str                      # maps to a providers.json group: "claude" / "codex"
+    protocol: str                   # maps to a providers.json group: anthropic / openai-chat / openai-responses
     long_context_threshold: int
     destinations: dict[str, Destination]
 

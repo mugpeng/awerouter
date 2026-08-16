@@ -10,6 +10,7 @@ import click
 from urllib.parse import urlparse
 
 from awerouter import __version__
+from awerouter.protocols import PROTOCOL_IDS
 from awerouter.types import Destination, Provider, RoutingProfile, Settings
 
 # ---------------------------------------------------------------------------
@@ -119,27 +120,44 @@ def _parse_destination(raw: str) -> Destination:
     return Destination(provider_name=provider_name, model=model)
 
 
+_OLD_AGENT_GROUPS = {"claude": "anthropic", "codex": "openai-chat / openai-responses"}
+
+
+def _die_bad_protocol_group(key: str) -> "SystemExit":
+    if key in _OLD_AGENT_GROUPS:
+        return die(
+            f"providers.json group '{key}' uses the old agent names — rename: "
+            + ", ".join(f"'{k}' → {v}" for k, v in _OLD_AGENT_GROUPS.items())
+        )
+    return die(
+        f"providers.json group '{key}' must be a protocol id: "
+        f"{', '.join(PROTOCOL_IDS)}"
+    )
+
+
 def load_providers(path: Optional[Path] = None) -> dict[str, dict[str, Provider]]:
-    """Load providers grouped by agent. Returns {agent: {provider_name: Provider}}."""
+    """Load providers grouped by protocol. Returns {protocol: {provider_name: Provider}}."""
     path = path or providers_path()
     data = _load_json(path, "providers.json")
     result: dict[str, dict[str, Provider]] = {}
-    for agent, group in data.items():
+    for protocol, group in data.items():
+        if protocol not in PROTOCOL_IDS:
+            _die_bad_protocol_group(protocol)
         if not isinstance(group, dict):
-            die(f"agent group '{agent}' must be an object")
-        agent_providers: dict[str, Provider] = {}
+            die(f"protocol group '{protocol}' must be an object")
+        group_providers: dict[str, Provider] = {}
         for name, entry in group.items():
             if not isinstance(entry, dict):
-                die(f"provider '{agent}.{name}' must be an object")
+                die(f"provider '{protocol}.{name}' must be an object")
             base_url = entry.get("base_url")
             auth = entry.get("auth")
             if not base_url or not auth:
-                die(f"provider '{agent}.{name}' missing base_url or auth")
+                die(f"provider '{protocol}.{name}' missing base_url or auth")
             auth_header = entry.get("auth_header") or detect_auth_header(base_url)
-            agent_providers[name] = Provider(
+            group_providers[name] = Provider(
                 name=name, base_url=base_url, auth=auth, auth_header=auth_header,
             )
-        result[agent] = agent_providers
+        result[protocol] = group_providers
     return result
 
 
@@ -162,9 +180,19 @@ def load_routing(path: Optional[Path] = None) -> tuple[Settings, dict[str, Routi
     for name, body in data.items():
         if not isinstance(body, dict):
             die(f"profile '{name}' must be an object")
-        agent = body.get("agent")
-        if not agent:
-            die(f"profile '{name}' missing required 'agent' field")
+        if "agent" in body:
+            die(
+                f"profile '{name}': 'agent' was renamed to 'protocol' "
+                "(claude → anthropic, codex → openai-chat / openai-responses); edit routing.json"
+            )
+        protocol = body.get("protocol")
+        if not protocol:
+            die(f"profile '{name}' missing required 'protocol' field")
+        if protocol not in PROTOCOL_IDS:
+            die(
+                f"profile '{name}': unknown protocol '{protocol}'; "
+                f"expected one of: {', '.join(PROTOCOL_IDS)}"
+            )
         for key in ("longContextThreshold", "destinations"):
             if key not in body:
                 die(f"profile '{name}' missing required key: {key}")
@@ -178,7 +206,7 @@ def load_routing(path: Optional[Path] = None) -> tuple[Settings, dict[str, Routi
             parsed[tier] = _parse_destination(str(raw))
         profiles[name] = RoutingProfile(
             name=name,
-            agent=str(agent),
+            protocol=str(protocol),
             long_context_threshold=int(body["longContextThreshold"]),
             destinations=parsed,
         )
@@ -193,17 +221,17 @@ def resolve_provider(name: str, providers: dict[str, Provider]) -> Provider:
 
 
 def validate_profiles(providers_all: dict, profiles: dict) -> None:
-    """Cross-check every profile's agent and destinations against providers.json.
+    """Cross-check every profile's protocol and destinations against providers.json.
 
     Called by both serve and config show, so bad references fail at load time
     instead of on the first request.
     """
     for profile in profiles.values():
-        group = providers_all.get(profile.agent)
+        group = providers_all.get(profile.protocol)
         if group is None:
             avail = ", ".join(providers_all) or "(none)"
             die(
-                f"agent '{profile.agent}' (for profile '{profile.name}') not found in "
+                f"protocol '{profile.protocol}' (for profile '{profile.name}') not found in "
                 f"providers.json; available: {avail}"
             )
         for tier, dest in profile.destinations.items():
@@ -211,7 +239,7 @@ def validate_profiles(providers_all: dict, profiles: dict) -> None:
 
 
 def load_for_profile(name: str) -> tuple[dict[str, Provider], RoutingProfile, Settings]:
-    """Resolve one profile: returns (agent providers, profile, settings)."""
+    """Resolve one profile: returns (protocol providers, profile, settings)."""
     providers_all = load_providers()
     settings, profiles = load_routing()
     if name not in profiles:
@@ -219,7 +247,7 @@ def load_for_profile(name: str) -> tuple[dict[str, Provider], RoutingProfile, Se
         die(f"profile '{name}' not found in routing.json; available: {avail}")
     profile = profiles[name]
     validate_profiles(providers_all, {name: profile})
-    return providers_all[profile.agent], profile, settings
+    return providers_all[profile.protocol], profile, settings
 
 
 def load_default_profile() -> tuple[dict[str, Provider], RoutingProfile, Settings]:
@@ -250,19 +278,19 @@ def init_config() -> None:
     shutil.copy2(TEMPLATE_ROUTING, routing_path())
 
 
-def save_provider(agent: str, name: str, base_url: str, auth: str) -> None:
+def save_provider(protocol: str, name: str, base_url: str, auth: str) -> None:
     """Append one provider entry to providers.json."""
     path = providers_path()
     data = _load_json(path, "providers.json")
-    group = data.setdefault(agent, {})
+    group = data.setdefault(protocol, {})
     if name in group:
-        die(f"provider already exists: {agent}.{name}")
+        die(f"provider already exists: {protocol}.{name}")
     group[name] = {"base_url": base_url, "auth": auth}
     path.write_text(json.dumps(data, indent=2) + "\n")
 
 
 def save_profile_entry(
-    name: str, agent: str, long_context_threshold: int, flash: str, pro: str
+    name: str, protocol: str, long_context_threshold: int, flash: str, pro: str
 ) -> None:
     """Append one profile entry to routing.json. flash/pro are 'provider,model'."""
     path = routing_path()
@@ -270,7 +298,7 @@ def save_profile_entry(
     if name in data:
         die(f"profile already exists: {name}")
     data[name] = {
-        "agent": agent,
+        "protocol": protocol,
         "longContextThreshold": long_context_threshold,
         "destinations": {"flash": flash, "pro": pro},
     }
@@ -283,16 +311,16 @@ def save_profile_entry(
 
 def format_providers_display(all_providers: dict[str, dict[str, Provider]]) -> str:
     display = {}
-    for agent, group in all_providers.items():
-        agent_display = {}
+    for protocol, group in all_providers.items():
+        protocol_display = {}
         for name, p in group.items():
             entry = {"base_url": p.base_url, "auth_header": p.auth_header}
             if ENV_REF_RE.fullmatch(str(p.auth)):
                 entry["auth"] = str(p.auth)
             else:
                 entry["auth"] = "<set>"
-            agent_display[name] = entry
-        display[agent] = agent_display
+            protocol_display[name] = entry
+        display[protocol] = protocol_display
     return json.dumps(display, indent=2)
 
 
@@ -306,7 +334,7 @@ def format_routing_display(settings: Settings, profiles: dict[str, RoutingProfil
     }
     for name, p in profiles.items():
         display[name] = {
-            "agent": p.agent,
+            "protocol": p.protocol,
             "longContextThreshold": p.long_context_threshold,
             "destinations": {
                 k: f"{v.provider_name},{v.model}" for k, v in p.destinations.items()

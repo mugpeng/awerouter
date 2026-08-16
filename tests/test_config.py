@@ -117,40 +117,52 @@ def _write_config(tmp_path, providers, routing):
 
 
 # ---------------------------------------------------------------------------
-# load_providers (nested by agent)
+# load_providers (nested by protocol)
 # ---------------------------------------------------------------------------
 
 class TestLoadProviders:
-    def test_nested_by_agent(self, tmp_path, monkeypatch):
+    def test_nested_by_protocol(self, tmp_path, monkeypatch):
         monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
         _write_config(tmp_path, {
-            "claude": {"p": {"base_url": "https://api.stepfun.com/step_plan", "auth": "${K}"}},
-            "codex":  {"p": {"base_url": "https://api.stepfun.com/v1",        "auth": "${K}"}},
+            "anthropic": {"p": {"base_url": "https://api.stepfun.com/step_plan", "auth": "${K}"}},
+            "openai-chat":  {"p": {"base_url": "https://api.stepfun.com",      "auth": "${K}"}},
         }, {})
         result = load_providers()
-        assert "claude" in result and "codex" in result
-        assert result["claude"]["p"].auth_header == "authorization"
+        assert "anthropic" in result and "openai-chat" in result
+        assert result["anthropic"]["p"].auth_header == "authorization"
 
     def test_anthropic_auto_detects_x_api_key(self, tmp_path, monkeypatch):
         monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
         _write_config(tmp_path, {
-            "claude": {"anthropic": {"base_url": "https://api.anthropic.com", "auth": "${K}"}},
+            "anthropic": {"anthropic": {"base_url": "https://api.anthropic.com", "auth": "${K}"}},
         }, {})
         result = load_providers()
-        assert result["claude"]["anthropic"].auth_header == "x-api-key"
+        assert result["anthropic"]["anthropic"].auth_header == "x-api-key"
 
     def test_explicit_auth_header_override(self, tmp_path, monkeypatch):
         monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
         _write_config(tmp_path, {
-            "claude": {"p": {"base_url": "https://x", "auth": "${K}", "auth_header": "x-api-key"}},
+            "anthropic": {"p": {"base_url": "https://x", "auth": "${K}", "auth_header": "x-api-key"}},
         }, {})
         result = load_providers()
-        assert result["claude"]["p"].auth_header == "x-api-key"
+        assert result["anthropic"]["p"].auth_header == "x-api-key"
 
     def test_missing_field_dies(self, tmp_path, monkeypatch):
         monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
-        _write_config(tmp_path, {"claude": {"p": {"base_url": "https://x"}}}, {})
+        _write_config(tmp_path, {"anthropic": {"p": {"base_url": "https://x"}}}, {})
         with pytest.raises(SystemExit, match="missing"):
+            load_providers()
+
+    def test_old_agent_group_dies_with_rename_hint(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+        _write_config(tmp_path, {"claude": {"p": {"base_url": "https://x", "auth": "${K}"}}}, {})
+        with pytest.raises(SystemExit, match="anthropic"):
+            load_providers()
+
+    def test_unknown_protocol_group_dies(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+        _write_config(tmp_path, {"nope": {"p": {"base_url": "https://x", "auth": "${K}"}}}, {})
+        with pytest.raises(SystemExit, match="protocol id"):
             load_providers()
 
 
@@ -164,7 +176,7 @@ class TestLoadRouting:
         monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
         _write_config(tmp_path, {}, {
             "cc-1": {
-                "agent": "claude", "longContextThreshold": 8000,
+                "protocol": "anthropic", "longContextThreshold": 8000,
                 "destinations": {"flash": "p,m1", "pro": "p,m2"},
             },
         })
@@ -178,7 +190,7 @@ class TestLoadRouting:
         _write_config(tmp_path, {}, {
             "settings": {"backgroundModel": "bg", "thinkModel": "strong", "webSearchModel": "flash"},
             "cc-1": {
-                "agent": "claude", "longContextThreshold": 1,
+                "protocol": "anthropic", "longContextThreshold": 1,
                 "destinations": {"flash": "p,m", "pro": "p,m"},
             },
         })
@@ -190,26 +202,44 @@ class TestLoadRouting:
     def test_multiple_profiles(self, tmp_path, monkeypatch):
         monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
         _write_config(tmp_path, {}, {
-            "cc-1": {"agent": "claude", "longContextThreshold": 1, "destinations": {"flash": "p,m", "pro": "p,m"}},
-            "cx-1": {"agent": "codex",  "longContextThreshold": 1, "destinations": {"flash": "p,m", "pro": "p,m"}},
+            "cc-1": {"protocol": "anthropic", "longContextThreshold": 1, "destinations": {"flash": "p,m", "pro": "p,m"}},
+            "cx-1": {"protocol": "openai-chat",  "longContextThreshold": 1, "destinations": {"flash": "p,m", "pro": "p,m"}},
         })
         _, profiles = load_routing()
         assert set(profiles) == {"cc-1", "cx-1"}
-        assert profiles["cc-1"].agent == "claude"
+        assert profiles["cc-1"].protocol == "anthropic"
 
-    def test_missing_agent_dies(self, tmp_path, monkeypatch):
+    def test_missing_protocol_dies(self, tmp_path, monkeypatch):
         monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
         _write_config(tmp_path, {}, {
             "cc-1": {"longContextThreshold": 1, "destinations": {"flash": "p,m", "pro": "p,m"}},
         })
-        with pytest.raises(SystemExit, match="agent"):
+        with pytest.raises(SystemExit, match="protocol"):
+            load_routing()
+
+    def test_old_agent_field_dies_with_rename_hint(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+        _write_config(tmp_path, {}, {
+            "cc-1": {"agent": "claude", "longContextThreshold": 1,
+                     "destinations": {"flash": "p,m", "pro": "p,m"}},
+        })
+        with pytest.raises(SystemExit, match="renamed to 'protocol'"):
+            load_routing()
+
+    def test_unknown_protocol_dies(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+        _write_config(tmp_path, {}, {
+            "cc-1": {"protocol": "nope", "longContextThreshold": 1,
+                     "destinations": {"flash": "p,m", "pro": "p,m"}},
+        })
+        with pytest.raises(SystemExit, match="unknown protocol"):
             load_routing()
 
     def test_profile_no_longer_needs_background_think(self, tmp_path, monkeypatch):
         """backgroundModel/thinkModel moved to settings — profile omits them."""
         monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
         _write_config(tmp_path, {}, {
-            "cc-1": {"agent": "claude", "longContextThreshold": 1,
+            "cc-1": {"protocol": "anthropic", "longContextThreshold": 1,
                      "destinations": {"flash": "p,m", "pro": "p,m"}},
         })
         _, profiles = load_routing()
@@ -223,9 +253,9 @@ class TestLoadRouting:
 class TestLoadForProfile:
     def test_returns_settings(self, tmp_path, monkeypatch):
         monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
-        _write_config(tmp_path, {"claude": {"p": {"base_url": "https://x", "auth": "${K}"}}}, {
+        _write_config(tmp_path, {"anthropic": {"p": {"base_url": "https://x", "auth": "${K}"}}}, {
             "settings": {"backgroundModel": "bg", "thinkModel": "strong"},
-            "cc-1": {"agent": "claude", "longContextThreshold": 1,
+            "cc-1": {"protocol": "anthropic", "longContextThreshold": 1,
                      "destinations": {"flash": "p,m1", "pro": "p,m2"}},
         })
         providers, profile, settings = load_for_profile("cc-1")
@@ -234,37 +264,37 @@ class TestLoadForProfile:
 
     def test_unknown_profile_dies(self, tmp_path, monkeypatch):
         monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
-        _write_config(tmp_path, {"claude": {}}, {
-            "cc-1": {"agent": "claude", "longContextThreshold": 1, "destinations": {"flash": "p,m", "pro": "p,m"}},
+        _write_config(tmp_path, {"anthropic": {}}, {
+            "cc-1": {"protocol": "anthropic", "longContextThreshold": 1, "destinations": {"flash": "p,m", "pro": "p,m"}},
         })
         with pytest.raises(SystemExit, match="not found"):
             load_for_profile("nope")
 
     def test_dest_provider_missing_dies(self, tmp_path, monkeypatch):
         monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
-        _write_config(tmp_path, {"claude": {"p": {"base_url": "https://x", "auth": "${K}"}}}, {
-            "cc-1": {"agent": "claude", "longContextThreshold": 1,
+        _write_config(tmp_path, {"anthropic": {"p": {"base_url": "https://x", "auth": "${K}"}}}, {
+            "cc-1": {"protocol": "anthropic", "longContextThreshold": 1,
                      "destinations": {"flash": "nonexistent,m", "pro": "p,m"}},
         })
         with pytest.raises(SystemExit, match="provider 'nonexistent'"):
             load_for_profile("cc-1")
 
-    def test_agent_missing_dies(self, tmp_path, monkeypatch):
+    def test_protocol_missing_dies(self, tmp_path, monkeypatch):
         monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
-        _write_config(tmp_path, {"claude": {"p": {"base_url": "https://x", "auth": "${K}"}}}, {
-            "cc-1": {"agent": "nope", "longContextThreshold": 1,
+        _write_config(tmp_path, {"anthropic": {"p": {"base_url": "https://x", "auth": "${K}"}}}, {
+            "cc-1": {"protocol": "openai-chat", "longContextThreshold": 1,
                      "destinations": {"flash": "p,m", "pro": "p,m"}},
         })
-        with pytest.raises(SystemExit, match="agent 'nope'"):
+        with pytest.raises(SystemExit, match="protocol 'openai-chat'"):
             load_for_profile("cc-1")
 
 
 class TestValidateProfiles:
     def _providers(self):
-        return {"claude": {"p": Provider("p", "https://x", "${K}")}}
+        return {"anthropic": {"p": Provider("p", "https://x", "${K}")}}
 
     def _profile(self, flash="p,m"):
-        return {"cc-1": RoutingProfile("cc-1", "claude", 1, {
+        return {"cc-1": RoutingProfile("cc-1", "anthropic", 1, {
             "flash": Destination(flash.split(",")[0], flash.split(",")[1]),
             "pro": Destination("p", "m2"),
         })}
@@ -276,19 +306,19 @@ class TestValidateProfiles:
         with pytest.raises(SystemExit, match="provider 'q'"):
             validate_profiles(self._providers(), self._profile("q,m"))
 
-    def test_unknown_agent_dies(self):
-        profiles = {"cc-1": RoutingProfile("cc-1", "codex", 1, {
+    def test_unknown_protocol_dies(self):
+        profiles = {"cc-1": RoutingProfile("cc-1", "openai-chat", 1, {
             "flash": Destination("p", "m1"), "pro": Destination("p", "m2"),
         })}
-        with pytest.raises(SystemExit, match="agent 'codex'"):
+        with pytest.raises(SystemExit, match="protocol 'openai-chat'"):
             validate_profiles(self._providers(), profiles)
 
 
 class TestLoadDefaultProfile:
     def test_single_auto_selects(self, tmp_path, monkeypatch):
         monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
-        _write_config(tmp_path, {"claude": {"p": {"base_url": "https://x", "auth": "${K}"}}}, {
-            "cc-1": {"agent": "claude", "longContextThreshold": 1, "destinations": {"flash": "p,m", "pro": "p,m"}},
+        _write_config(tmp_path, {"anthropic": {"p": {"base_url": "https://x", "auth": "${K}"}}}, {
+            "cc-1": {"protocol": "anthropic", "longContextThreshold": 1, "destinations": {"flash": "p,m", "pro": "p,m"}},
         })
         _, profile, settings = load_default_profile()
         assert profile.name == "cc-1"
@@ -296,9 +326,9 @@ class TestLoadDefaultProfile:
 
     def test_multiple_dies(self, tmp_path, monkeypatch):
         monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
-        _write_config(tmp_path, {"claude": {"p": {"base_url": "https://x", "auth": "${K}"}}}, {
-            "cc-1": {"agent": "claude", "longContextThreshold": 1, "destinations": {"flash": "p,m", "pro": "p,m"}},
-            "cc-2": {"agent": "claude", "longContextThreshold": 1, "destinations": {"flash": "p,m", "pro": "p,m"}},
+        _write_config(tmp_path, {"anthropic": {"p": {"base_url": "https://x", "auth": "${K}"}}}, {
+            "cc-1": {"protocol": "anthropic", "longContextThreshold": 1, "destinations": {"flash": "p,m", "pro": "p,m"}},
+            "cc-2": {"protocol": "anthropic", "longContextThreshold": 1, "destinations": {"flash": "p,m", "pro": "p,m"}},
         })
         with pytest.raises(SystemExit, match="multiple profiles"):
             load_default_profile()
@@ -324,20 +354,20 @@ class TestInitConfig:
 class TestFormatDisplay:
     def test_providers_nested(self):
         all_providers = {
-            "claude": {"p": Provider("p", "https://x", "${K}")},
+            "anthropic": {"p": Provider("p", "https://x", "${K}")},
         }
         data = json.loads(format_providers_display(all_providers))
-        assert data["claude"]["p"]["auth"] == "${K}"
+        assert data["anthropic"]["p"]["auth"] == "${K}"
 
     def test_routing_shows_settings_and_profiles(self):
         settings = Settings(background_model="flash", think_model="pro", web_search_model="pro")
         profiles = {
-            "cc-1": RoutingProfile("cc-1", "claude", 8000, {
+            "cc-1": RoutingProfile("cc-1", "anthropic", 8000, {
                 "flash": Destination("p", "m1"), "pro": Destination("p", "m2"),
             }),
         }
         data = json.loads(format_routing_display(settings, profiles))
         assert data["settings"]["backgroundModel"] == "flash"
         assert data["settings"]["webSearchModel"] == "pro"
-        assert data["cc-1"]["agent"] == "claude"
+        assert data["cc-1"]["protocol"] == "anthropic"
         assert "backgroundModel" not in data["cc-1"]

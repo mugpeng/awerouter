@@ -1,6 +1,7 @@
-"""Request classifier and router.
+"""Request router.
 
-Three-layer first-match-wins pipeline:
+Three-layer first-match-wins pipeline over a precomputed InspectResult
+(extracted per protocol by awerouter.protocols):
 
   L1 Capability guard  — web_search tool forces pro (flash can't run it)
   L2 Tier label match  — backgroundModel / thinkModel exact-match
@@ -9,35 +10,18 @@ Three-layer first-match-wins pipeline:
 
 from __future__ import annotations
 
-import re
-
 from awerouter.types import Destination, InspectResult, ResolveResult
-
-
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
-
-
-def inspect(body: dict) -> InspectResult:
-    return InspectResult(
-        token_count=_estimate_tokens(body),
-        has_image=_has_image(body),
-        has_web_search=_has_web_search(body),
-        message_count=len(body.get("messages", [])),
-    )
 
 
 def resolve(
     model: str | None,
-    body: dict,
+    feat: InspectResult,
     dests: dict[str, Destination],
     background_model: str,
     think_model: str,
     long_context_threshold: int,
     web_search_model: str = "pro",
 ) -> ResolveResult:
-    feat = inspect(body)
     m = model or ""
 
     # L1: capability guard ------------------------------------------------
@@ -88,52 +72,3 @@ def resolve(
         label="default",
         inspect=feat,
     )
-
-
-# ---------------------------------------------------------------------------
-# Feature extraction helpers
-# ---------------------------------------------------------------------------
-
-_CJK = re.compile(r"[一-鿿]")
-
-
-def _estimate_tokens(body: dict) -> int:
-    text = _extract_text(body)
-    if not text:
-        return 0
-    total = len(text)
-    cjk = len(_CJK.findall(text))
-    non_cjk = total - cjk
-    # non_cjk / 4 + cjk / 1.5  -> multiply by 12 to stay in int
-    return (non_cjk * 3 + cjk * 8) // 12 or 1
-
-
-def _extract_text(body: dict) -> str:
-    parts: list[str] = []
-    for msg in body.get("messages", []):
-        content = msg.get("content")
-        if isinstance(content, str):
-            parts.append(content)
-        elif isinstance(content, list):
-            for block in content:
-                if isinstance(block, dict) and block.get("type") == "text":
-                    parts.append(block.get("text", ""))
-    return " ".join(parts)
-
-
-def _has_image(body: dict) -> bool:
-    for msg in body.get("messages", []):
-        content = msg.get("content")
-        if isinstance(content, list):
-            for block in content:
-                if isinstance(block, dict) and block.get("type") == "image":
-                    return True
-    return False
-
-
-def _has_web_search(body: dict) -> bool:
-    for tool in body.get("tools", []) or []:
-        name = tool.get("name", "") if isinstance(tool, dict) else ""
-        if name.startswith("web_search_"):
-            return True
-    return False

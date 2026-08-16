@@ -24,6 +24,7 @@ from awerouter.config import (
     save_provider,
     validate_profiles,
 )
+from awerouter.protocols import PROTOCOL_IDS
 from awerouter.server import _serve
 
 # Attach config sub-group to the main cli group
@@ -78,8 +79,8 @@ def add():
     name = click.prompt("Profile name")
     if name in profiles:
         die(f"profile already exists: {name}")
-    agent = click.prompt("Agent group", type=click.Choice(["claude", "codex", "opencode"]), default="claude")
-    known = set(providers_all.get(agent, {}))
+    protocol = click.prompt("Protocol", type=click.Choice(PROTOCOL_IDS), default="anthropic")
+    known = set(providers_all.get(protocol, {}))
 
     def ask_tier(tier: str) -> str:
         hint = ", ".join(sorted(known)) or "none yet"
@@ -87,7 +88,7 @@ def add():
         if pname not in known:
             base_url = click.prompt(f"  {pname} base_url")
             auth_var = click.prompt(f"  {pname} auth env var name (stored as ${{VAR}})")
-            save_provider(agent, pname, base_url, f"${{{auth_var}}}")
+            save_provider(protocol, pname, base_url, f"${{{auth_var}}}")
             known.add(pname)
         model = click.prompt(f"{tier} model id")
         return f"{pname},{model}"
@@ -95,7 +96,7 @@ def add():
     flash = ask_tier("flash")
     pro = ask_tier("pro")
     threshold = click.prompt("longContextThreshold", default=8000, type=int)
-    save_profile_entry(name, agent, threshold, flash, pro)
+    save_profile_entry(name, protocol, threshold, flash, pro)
 
     # Fail loudly if the wizard wrote something inconsistent.
     validate_profiles(load_providers(), load_routing()[1])
@@ -105,7 +106,7 @@ def add():
 
 @cli.command("list")
 def list_profiles():
-    """List routing profiles (name, agent, flash, pro, threshold)."""
+    """List routing profiles (name, protocol, flash, pro, threshold)."""
     providers_all = load_providers()
     _, profiles = load_routing()
     validate_profiles(providers_all, profiles)
@@ -113,7 +114,7 @@ def list_profiles():
         flash = p.destinations["flash"]
         pro = p.destinations["pro"]
         click.echo(
-            f"{name}\t{p.agent}\t{flash.provider_name}/{flash.model}"
+            f"{name}\t{p.protocol}\t{flash.provider_name}/{flash.model}"
             f"\t{pro.provider_name}/{pro.model}\tL3>{p.long_context_threshold}"
         )
 
@@ -136,10 +137,10 @@ def show(profile):
         avail = ", ".join(profiles) or "(none)"
         die(f"profile '{profile}' not found in routing.json; available: {avail}")
     p = profiles[profile]
-    used = {d.provider_name: providers_all[p.agent][d.provider_name]
+    used = {d.provider_name: providers_all[p.protocol][d.provider_name]
             for d in p.destinations.values()}
     click.echo("providers:")
-    click.echo(format_providers_display({p.agent: used}))
+    click.echo(format_providers_display({p.protocol: used}))
     click.echo()
     click.echo("profile:")
     click.echo(format_routing_display(settings, {profile: p}))

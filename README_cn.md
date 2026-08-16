@@ -1,7 +1,7 @@
 <div align="center">
   <h1>awerouter: 智能 LLM 路由</h1>
   <p><strong>轻量任务走 Flash，复杂决策走 Pro。</strong></p>
-  <p>按请求结构信号做确定性路由的 Anthropic 透明代理——不猜语义、不用关键词、不跑分类器。</p>
+  <p>按请求结构信号做确定性路由的同协议透明代理——不猜语义、不用关键词、不跑分类器。支持 Anthropic Messages、OpenAI Chat Completions、OpenAI Responses 三种协议。</p>
   <p>
     <a href="./README.md">English</a> ·
     <strong>简体中文</strong>
@@ -23,7 +23,7 @@
   </p>
 </div>
 
-> 按结构信号把 Claude Code 流量拆分到不同 provider，省钱不降质。
+> 按结构信号把编码 agent 流量拆分到不同 provider，省钱不降质。同协议透传，不做协议转换。
 
 ## 安装
 
@@ -53,19 +53,32 @@ export ANTHROPIC_BASE_URL=http://127.0.0.1:20128
 
 `~/.config/awerouter/` 下两个文件（`AWEROUTER_CONFIG_DIR` 环境变量覆盖目录）：
 
-**providers.json** — 端点 + 密钥，按 agent 分组（`config show` 自动脱敏）：
+**providers.json** — 端点 + 密钥，按线上协议分组（`config show` 自动脱敏）：
 
 ```json
 {
-  "claude": {
+  "anthropic": {
     "stepfun":   { "base_url": "https://api.stepfun.com/step_plan", "auth": "${STEPFUN_AUTH_TOKEN}" },
     "anthropic": { "base_url": "https://api.anthropic.com",          "auth": "${ANTHROPIC_KEY}" }
   },
-  "codex": {
-    "stepfun": { "base_url": "https://api.stepfun.com/v1", "auth": "${STEPFUN_AUTH_TOKEN}" }
+  "openai-chat": {
+    "stepfun": { "base_url": "https://api.stepfun.com", "auth": "${STEPFUN_AUTH_TOKEN}" }
+  },
+  "openai-responses": {
+    "openai": { "base_url": "https://api.openai.com", "auth": "${OPENAI_API_KEY}" }
   }
 }
 ```
+
+支持三种协议，各自的端点路径拼在 `base_url` 后面：
+
+| 协议 id | 端点 | 典型客户端 |
+|---------|------|-----------|
+| `anthropic` | `base_url + /v1/messages` | Claude Code（`ANTHROPIC_BASE_URL`） |
+| `openai-chat` | `base_url + /v1/chat/completions` | OpenAI 兼容客户端；Codex（`wire_api = "chat"`） |
+| `openai-responses` | `base_url + /v1/responses` | Codex（`wire_api = "responses"`） |
+
+`base_url` 填协议端点之前的前缀——openai 系 provider 不要带尾部 `/v1`。
 
 鉴权头**根据 `base_url` 自动判断**：`anthropic.com` → `x-api-key`（裸 token）；其他 → `Authorization`（自动补 `Bearer `）。除非启发式判断错了，否则不需要填 `auth_header`。
 
@@ -78,7 +91,7 @@ export ANTHROPIC_BASE_URL=http://127.0.0.1:20128
     "thinkModel": "pro"
   },
   "cc-router-1": {
-    "agent": "claude",
+    "protocol": "anthropic",
     "longContextThreshold": 8000,
     "destinations": {
       "flash": "stepfun,step-3.7-flash",
@@ -92,7 +105,7 @@ export ANTHROPIC_BASE_URL=http://127.0.0.1:20128
 
 密钥用 `${ENV_VAR}` 引用。缺失的环境变量在启动时报错退出。
 
-> **基于 profile 的路由：** `routing.json` 用 profile id 分组（类似 aweswitch）。`awerouter serve <profile>` 启动其中一个；只有一个 profile 时自动选择。`agent` 字段把 profile 映射到 providers.json 的分组。
+> **基于 profile 的路由：** `routing.json` 用 profile id 分组（类似 aweswitch）。`awerouter serve <profile>` 启动其中一个；只有一个 profile 时自动选择。`protocol` 字段把 profile 映射到 providers.json 的分组，并决定它服务哪个端点——serve 横幅按协议打印对应客户端的环境变量（anthropic → Claude Code 的 `ANTHROPIC_BASE_URL`；openai 协议 → `OPENAI_BASE_URL` / Codex `wire_api`）。注意：openai 客户端是单 model 配置，L2 档位匹配基本不触发——openai 流量走 L1 + L3，默认 flash。
 
 ## 路由逻辑
 
@@ -111,7 +124,7 @@ CC 的 `/model` 选择器设置 tier model id（c1/flash / c1/pro / c1/think）�
 ```bash
 awerouter init                        # 创建默认配置（= config init）
 awerouter add                         # 交互式添加 profile（含新 provider）
-awerouter list                        # 列出 profile（名字、agent、flash、pro、阈值）
+awerouter list                        # 列出 profile（名字、协议、flash、pro、阈值）
 awerouter show [PROFILE]              # 查看单个 profile 或全部配置（脱敏）
 awerouter serve [PROFILE] [--port 20128] [--host 127.0.0.1]
 awerouter <PROFILE>                   # serve 的简写
