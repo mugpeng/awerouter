@@ -135,9 +135,9 @@ def _passes_log(entry, cutoff, profile_name) -> bool:
     return True
 
 
-def _usage_tail(lines: int, since=None, profile_name=None):
+def _usage_log(n, since=None, profile_name=None):
     from awerouter.logging import tail as _tail
-    entries = _tail(lines)
+    entries = _tail(n)  # n is None => whole file
     if since or profile_name:
         cutoff = _parse_since(since) if since else None
         entries = [e for e in entries if _passes_log(e, cutoff, profile_name)]
@@ -235,11 +235,16 @@ def usage(ctx, since, profile_name):
 
 
 @usage.command()
-@click.option("--lines", default=20, show_default=True, help="Tail N entries.")
+@click.option("--lines", default=20, show_default=True, help="Number of trailing entries to show.")
+@click.option("--all", "show_all", is_flag=True, default=False,
+              help="Show every entry instead of the last --lines.")
 @click.pass_context
-def tail(ctx, lines: int):
-    """Show recent request log entries verbatim."""
-    _usage_tail(lines, ctx.obj["since"], ctx.obj["profile"])
+def log(ctx, lines: int, show_all: bool):
+    """Show request log entries verbatim (last 20, or --all).
+
+    Last --lines by default; --all shows every entry.
+    """
+    _usage_log(None if show_all else lines, ctx.obj["since"], ctx.obj["profile"])
 
 
 @usage.command()

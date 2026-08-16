@@ -86,9 +86,21 @@ def _tail_lines(n: int) -> list:
     return [l.decode("utf-8", "replace") for l in lines[-n:]]
 
 
-def tail(n: int = 20) -> list[RequestLog]:
+def tail(n: int | None = 20) -> list[RequestLog]:
+    """Read request log entries.
+
+    n is the number of trailing entries to return; None reads the whole file
+    (bounded by the rotation cap).
+    """
+    if n is None:
+        f = _log_file()
+        if not f.exists():
+            return []
+        lines = f.read_text(encoding="utf-8").splitlines()
+    else:
+        lines = _tail_lines(n)
     result: list[RequestLog] = []
-    for line in _tail_lines(n):
+    for line in lines:
         if not line:
             continue
         try:

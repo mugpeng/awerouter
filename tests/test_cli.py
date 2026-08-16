@@ -179,10 +179,18 @@ class TestUsage:
         assert r.exit_code == 0, r.output
         assert "total_requests : 1" in r.output
 
-    def test_tail_subcommand(self, tmp_path, monkeypatch):
+    def test_log_subcommand(self, tmp_path, monkeypatch):
         _setup(tmp_path, monkeypatch, _providers(), _routing())
         self._seed_log(tmp_path, monkeypatch)
-        r = CliRunner().invoke(cli, ["usage", "tail", "--lines", "5"])
+        r = CliRunner().invoke(cli, ["usage", "log", "--lines", "5"])
+        assert r.exit_code == 0, r.output
+        assert "sf-flash" in r.output
+        assert "tokens=120" in r.output
+
+    def test_log_all(self, tmp_path, monkeypatch):
+        _setup(tmp_path, monkeypatch, _providers(), _routing())
+        self._seed_log(tmp_path, monkeypatch)
+        r = CliRunner().invoke(cli, ["usage", "log", "--all"])
         assert r.exit_code == 0, r.output
         assert "sf-flash" in r.output
         assert "tokens=120" in r.output

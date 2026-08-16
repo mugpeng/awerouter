@@ -210,14 +210,14 @@ awerouter serve [PROFILE] [--port 20128] [--host 127.0.0.1]
 awerouter <PROFILE>                   # serve 的简写
 awerouter config path | show | edit | init
 awerouter usage stats [--clean]
-awerouter usage tail [--lines 20]
+awerouter usage log [--lines 20] [--all]
 awerouter usage calibrate
 awerouter usage savings
 ```
 
 所有 `usage` 子命令读的是同一份请求日志；窗口选项放在 `usage` 和子命令之间（`awerouter usage --since today savings`）。
 
-`usage stats` 按 profile 汇总：label/destination/provider/model 分组（带百分比）、错误与降级计数、各 destination/provider/model 的延迟分位数（首字节与总时长）、估算 message tokens。`--since` 接受 `today`、`yesterday`、`7d` 或 `YYYY-MM-DD`（本地时间）；`--profile` 只看单个 profile；`--clean` 确认后删除已保存的日志。`usage tail` 原样显示最近条目。
+`usage stats` 按 profile 汇总：label/destination/provider/model 分组（带百分比）、错误与降级计数、各 destination/provider/model 的延迟分位数（首字节与总时长）、估算 message tokens。`--since` 接受 `today`、`yesterday`、`7d` 或 `YYYY-MM-DD`（本地时间）；`--profile` 只看单个 profile；`--clean` 确认后删除已保存的日志。`usage log` 原样显示条目——默认最后 20 条，加 `--all` 显示全部。
 
 `usage calibrate` 展示 L3 流量（受阈值影响的层）的消息 token 分布（仅统计 messages，不含 system prompt 与 tools 定义），并在 p90/p95/p99 处建议 `longContextThreshold` 候选值。跑一段真实流量后执行，再编辑 `routing.json`。
 

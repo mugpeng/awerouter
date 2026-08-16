@@ -288,6 +288,14 @@ class TestTail:
         append(_log("t0", "default", 1))
         assert tail(1)[0].request_id == "req-1"
 
+    def test_none_reads_whole_file(self, _log_dir):
+        from awerouter.logging import append
+        for i in range(5):
+            append(_log(f"t{i}", "default", i))
+        entries = tail(None)
+        assert [e.ts for e in entries] == ["t0", "t1", "t2", "t3", "t4"]
+        assert len(entries) == 5
+
     def test_large_file_tail_from_end(self, _log_dir):
         """tail must not need the whole file — write many long lines, ask for few."""
         from awerouter.logging import append

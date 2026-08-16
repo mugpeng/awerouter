@@ -210,14 +210,14 @@ awerouter serve [PROFILE] [--port 20128] [--host 127.0.0.1]
 awerouter <PROFILE>                   # shorthand for serve PROFILE
 awerouter config path | show | edit | init
 awerouter usage stats [--clean]
-awerouter usage tail [--lines 20]
+awerouter usage log [--lines 20] [--all]
 awerouter usage calibrate
 awerouter usage savings
 ```
 
 All `usage` subcommands read the same request log; window options sit between `usage` and the subcommand (`awerouter usage --since today savings`).
 
-`usage stats` aggregates the log per profile: label/destination/provider/model breakdowns with percentages, error and fallback counts, latency percentiles (first byte and total) per destination/provider/model, and estimated message tokens. `--since` accepts `today`, `yesterday`, `7d`, or `YYYY-MM-DD` (local time); `--profile` restricts to one profile; `--clean` deletes the saved logs after a confirmation prompt. `usage tail` shows recent entries verbatim.
+`usage stats` aggregates the log per profile: label/destination/provider/model breakdowns with percentages, error and fallback counts, latency percentiles (first byte and total) per destination/provider/model, and estimated message tokens. `--since` accepts `today`, `yesterday`, `7d`, or `YYYY-MM-DD` (local time); `--profile` restricts to one profile; `--clean` deletes the saved logs after a confirmation prompt. `usage log` shows entries verbatim — the last 20 by default, or every entry with `--all`.
 
 `usage calibrate` shows the message-token distribution of L3 traffic (the threshold-sensitive layer; messages only — system prompt and tools are excluded) and suggests candidate `longContextThreshold` values at p90/p95/p99. Run it after some real traffic, then edit `routing.json`.
 

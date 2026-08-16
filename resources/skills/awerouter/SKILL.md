@@ -37,7 +37,7 @@ You may run these read-only or non-interactive commands:
 - `awerouter config edit`
 - `awerouter list`
 - `awerouter usage stats`
-- `awerouter usage tail`
+- `awerouter usage log`
 - `awerouter usage calibrate`
 - `awerouter usage savings`
 
