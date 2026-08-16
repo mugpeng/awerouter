@@ -71,7 +71,9 @@ class TestSavings:
         assert "alternations: 1" in r.output
         assert "consecutive-pro gaps: 1 (0 within TTL, 1 expired)" in r.output
         assert "offload worth 10–100 pro-equivalent input tokens" in r.output
-        assert "money saved" in r.output
+        assert "plug in your input prices" in r.output
+        assert "(100 × pro − 100 × flash) / 1,000,000" in r.output
+        assert "(10 × pro − 100 × flash) / 1,000,000" in r.output
 
 
 class TestInit:

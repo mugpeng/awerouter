@@ -375,6 +375,7 @@ def _usage_savings(since, profile_name):
     click.echo(f"  offloaded to flash {offloaded:,}  ({pct_tok}% of input tokens)")
 
     c = cadence(cutoff, profile_name)
+    lower = None
     if c and c["requests"] > 1 and offloaded:
         lower = round(offloaded * _CACHE_READ_FACTOR)
         click.echo()
@@ -389,8 +390,13 @@ def _usage_savings(since, profile_name):
         click.echo("  (lower = all would have been cache reads; a cache-warm pro-only baseline sits near it)")
 
     click.echo()
-    click.echo("money saved ≈ effective-offloaded × (pro − flash input price per token)")
-    click.echo("flash-side caching and capability-mismatch turns are not modeled")
+    if offloaded:
+        click.echo("plug in your input prices (per 1M tokens) to get money saved:")
+        click.echo(f"  upper       = ({offloaded:,} × pro − {offloaded:,} × flash) / 1,000,000")
+        if lower is not None:
+            click.echo(f"  cache-aware = ({lower:,} × pro − {offloaded:,} × flash) / 1,000,000")
+            click.echo("  (cache-aware assumes the pro-only baseline billed the offload as ~10% cache reads)")
+        click.echo("flash-side caching (would lower flash cost) and capability-mismatch turns are not modeled")
 
 
 def main(argv=None):
