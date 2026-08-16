@@ -223,22 +223,30 @@ async def _proxy_flow(request: web.Request, endpoint_protocol: str) -> web.Strea
             if val:
                 resp.headers[h] = val
 
-        await resp.prepare(request)
-
         byte_count = 0
         try:
-            async for chunk in up.content.iter_any():
-                await resp.write(chunk)
-                byte_count += len(chunk)
-                state.streaming_started = True
-        except (aiohttp.ClientError, asyncio.TimeoutError, ConnectionError):
-            # Client disconnect or upstream mid-stream error — log partial
-            status = status if status and status < 400 else (status or 499)
-        finally:
             try:
-                await resp.write_eof()
-            except Exception:
-                pass
+                await resp.prepare(request)
+            except (aiohttp.ClientError, ConnectionError):
+                # Client hung up before we wrote headers — not an upstream
+                # failure. Log the request as a client disconnect and stop
+                # quietly instead of letting aiohttp log a 500 traceback.
+                status = 499
+            else:
+                try:
+                    async for chunk in up.content.iter_any():
+                        await resp.write(chunk)
+                        byte_count += len(chunk)
+                        state.streaming_started = True
+                except (aiohttp.ClientError, asyncio.TimeoutError, ConnectionError):
+                    # Client disconnect or upstream mid-stream error — log partial
+                    status = status if status and status < 400 else (status or 499)
+                finally:
+                    try:
+                        await resp.write_eof()
+                    except Exception:
+                        pass
+        finally:
             up.close()
 
         # Log (always, even on disconnect — needed for calibration)
