@@ -211,6 +211,10 @@ def load_routing(path: Optional[Path] = None) -> tuple[Settings, dict[str, Routi
         for key in ("longContextThreshold", "destinations"):
             if key not in body:
                 die(f"profile '{name}' missing required key: {key}")
+        port_raw = body.get("port")
+        if port_raw is not None:
+            if isinstance(port_raw, bool) or not isinstance(port_raw, int) or not 1 <= port_raw <= 65535:
+                die(f"profile '{name}': 'port' must be an integer in 1-65535, got: {port_raw!r}")
         dests_raw = body["destinations"]
         if not isinstance(dests_raw, dict):
             die(f"profile '{name}' destinations must be an object")
@@ -224,6 +228,7 @@ def load_routing(path: Optional[Path] = None) -> tuple[Settings, dict[str, Routi
             protocol=str(protocol),
             long_context_threshold=int(body["longContextThreshold"]),
             destinations=parsed,
+            port=port_raw,
         )
     return settings, profiles
 
@@ -350,13 +355,16 @@ def format_routing_display(settings: Settings, profiles: dict[str, RoutingProfil
         },
     }
     for name, p in profiles.items():
-        display[name] = {
+        entry = {
             "protocol": p.protocol,
             "longContextThreshold": p.long_context_threshold,
-            "destinations": {
-                k: f"{v.provider_name},{v.model}" for k, v in p.destinations.items()
-            },
         }
+        if p.port is not None:
+            entry["port"] = p.port
+        entry["destinations"] = {
+            k: f"{v.provider_name},{v.model}" for k, v in p.destinations.items()
+        }
+        display[name] = entry
     return json.dumps(display, indent=2)
 
 

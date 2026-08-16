@@ -36,6 +36,7 @@ class RoutingProfile:
     protocol: str                   # maps to a providers.json group: anthropic / openai-chat / openai-responses
     long_context_threshold: int
     destinations: dict[str, Destination]
+    port: Optional[int] = None      # fixed listen port; --port overrides, else default 20128
 
 
 @dataclass

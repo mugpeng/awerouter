@@ -245,6 +245,44 @@ class TestLoadRouting:
         _, profiles = load_routing()
         assert not hasattr(profiles["cc-1"], "background_model")
 
+    def test_port_parsed(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+        _write_config(tmp_path, {}, {
+            "cc-1": {"protocol": "anthropic", "longContextThreshold": 1,
+                     "destinations": {"flash": "p,m", "pro": "p,m"}, "port": 20129},
+        })
+        _, profiles = load_routing()
+        assert profiles["cc-1"].port == 20129
+
+    def test_port_optional_defaults_to_none(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+        _write_config(tmp_path, {}, {
+            "cc-1": {"protocol": "anthropic", "longContextThreshold": 1,
+                     "destinations": {"flash": "p,m", "pro": "p,m"}},
+        })
+        _, profiles = load_routing()
+        assert profiles["cc-1"].port is None
+
+    def test_port_out_of_range_dies(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+        for bad in (0, 65536):
+            _write_config(tmp_path, {}, {
+                "cc-1": {"protocol": "anthropic", "longContextThreshold": 1,
+                         "destinations": {"flash": "p,m", "pro": "p,m"}, "port": bad},
+            })
+            with pytest.raises(SystemExit, match="'port'"):
+                load_routing()
+
+    def test_port_non_int_dies(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+        for bad in ("20129", 1.5, True):
+            _write_config(tmp_path, {}, {
+                "cc-1": {"protocol": "anthropic", "longContextThreshold": 1,
+                         "destinations": {"flash": "p,m", "pro": "p,m"}, "port": bad},
+            })
+            with pytest.raises(SystemExit, match="'port'"):
+                load_routing()
+
 
 # ---------------------------------------------------------------------------
 # load_for_profile / load_default_profile
@@ -371,3 +409,14 @@ class TestFormatDisplay:
         assert data["settings"]["webSearchModel"] == "pro"
         assert data["cc-1"]["protocol"] == "anthropic"
         assert "backgroundModel" not in data["cc-1"]
+        assert "port" not in data["cc-1"]
+
+    def test_routing_shows_port_when_set(self):
+        settings = Settings()
+        profiles = {
+            "cc-1": RoutingProfile("cc-1", "anthropic", 8000, {
+                "flash": Destination("p", "m1"), "pro": Destination("p", "m2"),
+            }, port=20129),
+        }
+        data = json.loads(format_routing_display(settings, profiles))
+        assert data["cc-1"]["port"] == 20129

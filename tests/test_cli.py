@@ -4,7 +4,7 @@ import json
 
 from click.testing import CliRunner
 
-from awerouter.cli import cli
+from awerouter.cli import _resolve_port, _run_serve, cli
 from awerouter.config import load_for_profile
 
 
@@ -98,8 +98,61 @@ class TestList:
         r = CliRunner().invoke(cli, ["list"])
         assert r.exit_code == 0
         lines = r.output.splitlines()
-        assert any(l.startswith("cc-1\tanthropic\tstepfun/sf-flash\tanthropic/opus\tL3>8000") for l in lines)
-        assert any(l.startswith("cc-2\tanthropic\tstepfun/sf-flash\tstepfun/sf-pro\tL3>4000") for l in lines)
+        assert any(l.startswith("cc-1\tanthropic\t-\tstepfun/sf-flash\tanthropic/opus\tL3>8000") for l in lines)
+        assert any(l.startswith("cc-2\tanthropic\t-\tstepfun/sf-flash\tstepfun/sf-pro\tL3>4000") for l in lines)
+
+    def test_lists_profile_port(self, tmp_path, monkeypatch):
+        routing = _routing()
+        routing["cc-1"]["port"] = 20129
+        _setup(tmp_path, monkeypatch, _providers(), routing)
+        r = CliRunner().invoke(cli, ["list"])
+        assert r.exit_code == 0
+        lines = r.output.splitlines()
+        assert any(l.startswith("cc-1\tanthropic\t20129\t") for l in lines)
+        assert any(l.startswith("cc-2\tanthropic\t-\t") for l in lines)
+
+
+class TestResolvePort:
+    """--port > profile 'port' field > 20128; explicit ports must not drift."""
+
+    def _profile(self, port=None):
+        from awerouter.types import RoutingProfile
+        return RoutingProfile("cc-1", "anthropic", 1, {}, port)
+
+    def test_cli_flag_wins(self):
+        assert _resolve_port(3000, self._profile(20129)) == (3000, True)
+
+    def test_profile_port_when_no_flag(self):
+        assert _resolve_port(None, self._profile(20129)) == (20129, True)
+
+    def test_default_when_nothing_set(self):
+        assert _resolve_port(None, self._profile()) == (20128, False)
+
+    def test_run_serve_passes_resolved_port(self, tmp_path, monkeypatch):
+        routing = _routing()
+        routing["cc-1"]["port"] = 20129
+        _setup(tmp_path, monkeypatch, _providers(), routing)
+        calls = {}
+
+        async def fake_serve(host, port, providers, profile, settings, port_explicit=False):
+            calls["args"] = (host, port, port_explicit)
+
+        monkeypatch.setattr("awerouter.cli._serve", fake_serve)
+        _run_serve("cc-1", None, "127.0.0.1")
+        assert calls["args"] == ("127.0.0.1", 20129, True)
+
+    def test_run_serve_cli_flag_overrides_profile(self, tmp_path, monkeypatch):
+        routing = _routing()
+        routing["cc-1"]["port"] = 20129
+        _setup(tmp_path, monkeypatch, _providers(), routing)
+        calls = {}
+
+        async def fake_serve(host, port, providers, profile, settings, port_explicit=False):
+            calls["args"] = (host, port, port_explicit)
+
+        monkeypatch.setattr("awerouter.cli._serve", fake_serve)
+        _run_serve("cc-1", 3000, "127.0.0.1")
+        assert calls["args"] == ("127.0.0.1", 3000, True)
 
 
 class TestAdd:

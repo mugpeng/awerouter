@@ -31,21 +31,38 @@ from awerouter.server import _serve
 # Attach config sub-group to the main cli group
 cli = config_cli
 
+DEFAULT_PORT = 20128
 
-def _run_serve(profile, port: int, host: str) -> None:
+
+def _resolve_port(cli_port, profile) -> tuple[int, bool]:
+    """--port wins over the profile's 'port' field, which wins over the default.
+
+    Returns (port, explicit); an explicit port must not silently move on
+    conflict — clients point at it.
+    """
+    if cli_port is not None:
+        return cli_port, True
+    if profile.port is not None:
+        return profile.port, True
+    return DEFAULT_PORT, False
+
+
+def _run_serve(profile, port, host: str) -> None:
     if profile:
         providers, routing, settings = load_for_profile(profile)
     else:
         providers, routing, settings = load_default_profile()
+    port, port_explicit = _resolve_port(port, routing)
     try:
-        asyncio.run(_serve(host, port, providers, routing, settings))
+        asyncio.run(_serve(host, port, providers, routing, settings, port_explicit))
     except KeyboardInterrupt:
         raise SystemExit(0)
 
 
 @cli.command()
 @click.argument("profile", required=False)
-@click.option("--port", default=20128, show_default=True, help="Listen port.")
+@click.option("--port", default=None, type=int,
+              help="Listen port (overrides the profile's 'port'; default 20128).")
 @click.option("--host", default="127.0.0.1", show_default=True, help="Bind address.")
 def serve(profile, port: int, host: str):
     """Start the awerouter daemon for PROFILE.
@@ -57,7 +74,8 @@ def serve(profile, port: int, host: str):
 
 
 @click.command("__serve_profile__", hidden=True)
-@click.option("--port", default=20128, show_default=True, help="Listen port.")
+@click.option("--port", default=None, type=int,
+              help="Listen port (overrides the profile's 'port'; default 20128).")
 @click.option("--host", default="127.0.0.1", show_default=True, help="Bind address.")
 @click.pass_context
 def _serve_profile(ctx, port: int, host: str):
@@ -121,7 +139,7 @@ def add():
 
 @cli.command("list")
 def list_profiles():
-    """List routing profiles (name, protocol, flash, pro, threshold)."""
+    """List routing profiles (name, protocol, port, flash, pro, threshold)."""
     providers_all = load_providers()
     _, profiles = load_routing()
     validate_profiles(providers_all, profiles)
@@ -129,7 +147,7 @@ def list_profiles():
         flash = p.destinations["flash"]
         pro = p.destinations["pro"]
         click.echo(
-            f"{name}\t{p.protocol}\t{flash.provider_name}/{flash.model}"
+            f"{name}\t{p.protocol}\t{p.port or '-'}\t{flash.provider_name}/{flash.model}"
             f"\t{pro.provider_name}/{pro.model}\tL3>{p.long_context_threshold}"
         )
 

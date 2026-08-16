@@ -8,7 +8,7 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from awerouter.server import _agent_from_ua, _loopback_proxy_warning, create_app
+from awerouter.server import _agent_from_ua, _loopback_proxy_warning, _serve, create_app
 from awerouter.types import Destination, Provider, RoutingProfile, Settings
 
 
@@ -561,3 +561,36 @@ class TestLoopbackProxyWarning:
         monkeypatch.setenv("http_proxy", "http://127.0.0.1:7890")
         monkeypatch.setenv("no_proxy", "127.0.0.1,localhost")
         assert _loopback_proxy_warning() is None
+
+
+class TestServePortConflict:
+    """An explicitly chosen port must die on conflict; the implicit default
+    keeps the random-free-port fallback."""
+
+    def _occupied_port(self):
+        s = socket.socket()
+        s.bind(("127.0.0.1", 0))
+        s.listen(1)
+        return s, s.getsockname()[1]
+
+    def test_explicit_port_conflict_dies(self):
+        s, port = self._occupied_port()
+        try:
+            with pytest.raises(SystemExit, match="already in use"):
+                asyncio.run(_serve("127.0.0.1", port, _providers(0), ROUTING, SETTINGS,
+                                   port_explicit=True))
+        finally:
+            s.close()
+
+    def test_implicit_port_conflict_falls_back(self, capsys):
+        s, port = self._occupied_port()
+        try:
+            with pytest.raises(asyncio.TimeoutError):
+                asyncio.run(asyncio.wait_for(
+                    _serve("127.0.0.1", port, _providers(0), ROUTING, SETTINGS),
+                    timeout=1.0))
+            out = capsys.readouterr().out
+            assert "listening on" in out
+            assert f"listening on 127.0.0.1:{port}" not in out  # moved off the busy port
+        finally:
+            s.close()

@@ -17,7 +17,7 @@ import uuid
 import aiohttp
 from aiohttp import web
 
-from awerouter.config import expand_value
+from awerouter.config import die, expand_value
 from awerouter.logging import append, ensure_log_dir
 from awerouter.protocols import ENDPOINT_PATHS, extract
 from awerouter.router import resolve
@@ -473,7 +473,8 @@ def _client_hint(protocol: str, display_host: str, port: int, settings) -> str:
     )
 
 
-async def _serve(host: str, port: int, providers: dict, profile, settings) -> None:
+async def _serve(host: str, port: int, providers: dict, profile, settings,
+                 port_explicit: bool = False) -> None:
     app = create_app(providers, profile, settings)
     runner = web.AppRunner(app)
     await runner.setup()
@@ -481,11 +482,21 @@ async def _serve(host: str, port: int, providers: dict, profile, settings) -> No
         site = web.TCPSite(runner, host=host, port=port)
         await site.start()
     except OSError:
+        # An explicitly chosen port (--port or the profile's port field) must
+        # not silently move: clients hardcode it. Only the implicit default
+        # falls back to a random free port.
+        if port_explicit:
+            die(
+                f"port {port} is already in use — another awerouter (or process) is holding it.\n"
+                f"  stop it first, or launch with a different --port"
+            )
         site = web.TCPSite(runner, host=host, port=0)
         await site.start()
     actual_port = site._server.sockets[0].getsockname()[1]
     print(f"awerouter listening on {host}:{actual_port}  [{profile.name}]")
     print(f"  protocol      -> {profile.protocol}")
+    if profile.port is not None:
+        print(f"  port          -> {profile.port} (from routing.json; --port overrides)")
     print(f"  bg            -> {settings.background_model}  "
           f"think -> {settings.think_model}  "
           f"main -> auto  web_search -> {settings.web_search_model}")
