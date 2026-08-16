@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.3.0 - 2026-08-16
+## v0.2.5 - 2026-08-16
 
 Protocol-based provider grouping with same-protocol passthrough for all three major wire protocols.
 
