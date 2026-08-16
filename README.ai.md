@@ -177,7 +177,50 @@ If the user is unsure, recommend starting from `awerouter init` and changing one
 
 ---
 
-## Step 5: Point the client at awerouter
+## Step 5: Set up environment variables
+
+Provider auth uses `${ENV_VAR}` references that expand from the shell environment. These must be set before starting `awerouter serve`.
+
+### Where to put them
+
+| Platform | Target | Scope |
+|----------|--------|-------|
+| zsh (default on macOS) | `~/.zshrc` | all zsh shells |
+| bash | `~/.bashrc` or `~/.bash_profile` | all bash shells |
+| Windows | `setx` (writes user environment variables) | cmd and PowerShell both |
+
+On Windows, prefer `setx` — it persists to the user environment, so both cmd and PowerShell pick it up.
+
+### Format
+
+bash/zsh — append to the shell config file:
+
+```bash
+export STEPFUN_AUTH_TOKEN="..."
+export GLM_API_KEY="..."
+export OPENAI_API_KEY="..."
+```
+
+Windows — run `setx` (works from cmd and PowerShell):
+
+```bat
+setx STEPFUN_AUTH_TOKEN "..."
+setx GLM_API_KEY "..."
+setx OPENAI_API_KEY "..."
+```
+
+Do not pass `/M` to `setx` — that targets machine scope and requires admin.
+
+### Steps
+
+1. Read `providers.json` to find which `${ENV_VAR}` names are referenced.
+2. Check which env vars are already set to avoid duplicates.
+3. Set them using the platform-appropriate method.
+4. Tell the user to reload: `source ~/.zshrc` (bash/zsh) or open a new terminal (Windows `setx` — it does not affect the current one).
+
+---
+
+## Step 6: Point the client at awerouter
 
 Set the client's base URL to the awerouter daemon port shown by `awerouter serve`.
 
@@ -194,7 +237,7 @@ If only one routing profile exists, the profile name is optional.
 
 ---
 
-## Step 6: Verify and tune
+## Step 7: Verify and tune
 
 Run these checks:
 ```bash
@@ -209,6 +252,38 @@ If the user wants cheaper routing without losing accuracy:
 1. Start from `awerouter usage calibrate`.
 2. Adjust `longContextThreshold`.
 3. Review `awerouter usage savings`.
+
+## Final Step
+
+After setup, tell the user to invoke skills (`/` in Claude Code, `$` in Codex, or the equivalent in other agents) and check if `awerouter` appears in the list. If it does, the skill is ready to use immediately. If not, the user should restart the agent.
+
+> awerouter is installed and configured. Invoke skills (type `/` or `$` depending on your agent) and look for `awerouter` — if it appears, you're good to go. If not, restart the agent. Then you can ask me things like:
+>
+> - "Add a GLM provider for the openai-chat group."
+> - "List my awerouter profiles."
+> - "Tune longContextThreshold from my usage."
+
+If the user is speaking Chinese, use this version instead:
+
+> awerouter 已安装并配置完成。请调用 skills（输入 `/` 或 `$`，取决于你的 agent），看看列表中是否出现了 `awerouter`。如果出现了，说明已就绪可以直接使用。如果没有，请重启 agent 后再试。然后你可以继续问我，例如：
+>
+> - "给 openai-chat 分组加一个 GLM provider。"
+> - "列出我的 awerouter profile。"
+> - "根据 usage 调一下 longContextThreshold。"
+
+---
+
+## Next Steps
+
+### aweswitch — profile-based launching
+
+awerouter pairs naturally with [aweswitch](https://github.com/Webioinfo01/aweswitch), the agent profile switcher. An aweswitch profile can point `ANTHROPIC_BASE_URL` (plus `ANTHROPIC_MODEL=auto` and the `_HAIKU_`/`_OPUS_` tier vars) at the awerouter daemon so routing is applied on launch.
+
+If the user agrees, read the aweswitch AI install guide:
+
+```
+https://github.com/Webioinfo01/aweswitch/blob/main/README.ai.md
+```
 
 ## Safety Rules
 

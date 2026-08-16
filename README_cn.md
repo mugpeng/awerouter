@@ -1,10 +1,13 @@
 <div align="center">
-  <h1>awerouter: 智能 LLM 路由</h1>
+  <h1>awerouter: 智能 LLM 路由 <a href="https://github.com/Webioinfo01/aweskill"><img src="https://raw.githubusercontent.com/Webioinfo01/aweskill/main/logo/aweskill-badge2.svg" alt="aweskill companion"></a></h1>
   <p><strong>轻量任务走 Flash，复杂决策走 Pro。</strong></p>
   <p>按请求结构信号做确定性路由的同协议透明代理——不猜语义、不用关键词、不跑分类器。支持 Anthropic Messages、OpenAI Chat Completions、OpenAI Responses 三种协议。</p>
   <p>
     <a href="./README.md">English</a> ·
     <strong>简体中文</strong>
+  </p>
+  <p>
+    <a href="https://ko-fi.com/mugpeng"><img src="https://img.shields.io/badge/Ko--fi-Buy%20me%20a%20coffee-FF5E5B?style=flat-square&logo=ko-fi&logoColor=white" alt="Ko-fi"></a>
   </p>
   <p>
     <img src="https://img.shields.io/pypi/v/awerouter?style=flat-square&color=7C3AED" alt="Version">
@@ -17,9 +20,6 @@
     <img src="https://img.shields.io/badge/platform-terminal-334155?style=flat-square" alt="Platform">
     <img src="https://img.shields.io/pypi/dm/awerouter?style=flat-square" alt="Downloads">
     <img src="https://img.shields.io/github/stars/mugpeng/awerouter?style=flat-square" alt="Stars">
-  </p>
-  <p>
-    <a href="https://ko-fi.com/mugpeng"><img src="https://img.shields.io/badge/Ko--fi-Buy%20me%20a%20coffee-FF5E5B?style=flat-square&logo=ko-fi&logoColor=white" alt="Ko-fi"></a>
   </p>
 </div>
 
@@ -48,6 +48,40 @@ awerouter serve [cc-router-1]     # 等价简写：awerouter cc-router-1
 export ANTHROPIC_BASE_URL=http://127.0.0.1:20128
 # aweswitch profile 环境变量：ANTHROPIC_MODEL=auto, _HAIKU_=flash, _OPUS_=pro
 ```
+
+## 让 AI agent 配置
+
+如果你在 Claude Code、Codex、Cursor 等 coding agent 中工作，直接告诉它：
+
+```text
+Read https://github.com/mugpeng/awerouter/blob/main/README.ai.md and follow it to install and configure awerouter.
+```
+
+Agent 会安装 CLI、初始化配置、帮你添加 profile，并通过 [aweskill](https://aweskill.webioinfo.top/) 安装 awerouter skill，用于后续路由管理。
+
+**配置完成后你可以这样告诉 agent：**
+
+> "加一个 stepfun 的 flash provider 和一个 pro profile。"
+> "列出我的 awerouter profile。"
+> "根据 usage 帮我调一下 longContextThreshold。"
+> "解释一下我的 usage savings。"
+
+Agent 可以运行只读命令（`list`、`show`、`config show`、`usage stats`、`usage calibrate`、`usage savings`）并编辑配置，但不会运行 `awerouter serve` —— 那会启动一个常驻 daemon。请在你自己的终端启动：
+
+```bash
+awerouter serve cc-router-1
+```
+
+### awerouter skill
+
+通过 [aweskill](https://aweskill.webioinfo.top/) 安装 [awerouter skill](https://github.com/mugpeng/awerouter/blob/main/resources/skills/awerouter/SKILL.md)，可以让 AI agent 用自然语言管理路由：
+
+- 列出、查看、添加、编辑路由 profile
+- 分别编辑 `providers.json`（端点/密钥）和 `routing.json`（策略）
+- 读取 `usage stats` / `usage calibrate` / `usage savings` 并给出阈值调整建议
+- 引导配置 `${ENV_VAR}` 引用所需的环境变量
+
+安装后你可以直接告诉 agent："给 openai-chat 分组加一个 GLM provider"、"把 longContextThreshold 调到 12000"、"看看我的 web_search 流量走哪个 provider"，agent 会读取配置、做修改、用 `awerouter config show` / `awerouter list` 验证。
 
 ## 配置
 
@@ -88,7 +122,8 @@ export ANTHROPIC_BASE_URL=http://127.0.0.1:20128
 {
   "settings": {
     "backgroundModel": "flash",
-    "thinkModel": "pro"
+    "thinkModel": "pro",
+    "webSearchModel": "pro"
   },
   "cc-router-1": {
     "protocol": "anthropic",
@@ -101,7 +136,7 @@ export ANTHROPIC_BASE_URL=http://127.0.0.1:20128
 }
 ```
 
-`settings` 可省（默认 `flash`/`pro`）。它定义 CC 发送的档位 model id：background（Haiku 档）和 think（Opus 档）。主循环用 `auto`——由 L3 按难度路由。在 aweswitch profile 里设：`ANTHROPIC_DEFAULT_HAIKU_MODEL=flash`、`ANTHROPIC_MODEL=auto`、`ANTHROPIC_DEFAULT_OPUS_MODEL=pro`。
+`settings` 可省（默认 `flash`/`pro`）。它定义 CC 发送的档位 model id：background（Haiku 档）、think（Opus 档），以及 L1 web_search 流量的目标档位 `webSearchModel`（默认 `pro`）。主循环用 `auto`——由 L3 按难度路由。在 aweswitch profile 里设：`ANTHROPIC_DEFAULT_HAIKU_MODEL=flash`、`ANTHROPIC_MODEL=auto`、`ANTHROPIC_DEFAULT_OPUS_MODEL=pro`。
 
 密钥用 `${ENV_VAR}` 引用。缺失的环境变量在启动时报错退出。
 
@@ -113,7 +148,7 @@ export ANTHROPIC_BASE_URL=http://127.0.0.1:20128
 
 | 层 | 信号 | 决策 |
 |----|------|------|
-| L1 能力护栏 | body 含 `web_search` 工具 | **pro**（flash 不支持） |
+| L1 能力护栏 | body 含 `web_search` 工具 | `settings.webSearchModel`（默认 **pro**） |
 | L2 档位匹配 | `model == c1/flash` 或 `c1/think` | flash / pro |
 | L3 难度评分 | token 超阈值，或含图片 | **pro**；否则 **flash** |
 

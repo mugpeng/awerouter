@@ -3,7 +3,7 @@
 Three-layer first-match-wins pipeline over a precomputed InspectResult
 (extracted per protocol by awerouter.protocols):
 
-  L1 Capability guard  — web_search tool forces pro (flash can't run it)
+  L1 Capability guard  — web_search tool -> settings.webSearchModel (default pro)
   L2 Tier label match  — backgroundModel / thinkModel exact-match
   L3 Difficulty score  — long context / image -> pro; default -> flash (cost-first)
 """

@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.3.0 - 2026-08-16
+
+### Added
+- AI agent setup docs (`README.ai.md`) with step-by-step install, config, and verification guide.
+- `awerouter` skill docs for AI agent management of routing via natural language.
+- Environment variable setup guide for `${ENV_VAR}` auth references across platforms.
+- aweswitch integration section: profile-based launching with `ANTHROPIC_BASE_URL` pointing at the awerouter daemon.
+- `webSearchModel` setting: L1 web_search traffic now routes to `settings.webSearchModel` (default `pro`) instead of hardcoded pro.
+- README badge reorganized; Ko-fi badge moved to header.
+
 ## v0.2.9 - 2026-08-16
 
 ### Breaking

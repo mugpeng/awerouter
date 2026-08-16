@@ -1,10 +1,13 @@
 <div align="center">
-  <h1>awerouter: Smart LLM Router</h1>
+  <h1>awerouter: Smart LLM Router <a href="https://github.com/Webioinfo01/aweskill"><img src="https://raw.githubusercontent.com/Webioinfo01/aweskill/main/logo/aweskill-badge2.svg" alt="aweskill companion"></a></h1>
   <p><strong>Route cheap/fast tasks to Flash, hard decisions to Pro.</strong></p>
   <p>Transparent same-protocol proxy that routes coding-agent requests by structural signals — no keyword guessing, no LLM classifier. Speaks Anthropic Messages, OpenAI Chat Completions, and OpenAI Responses.</p>
   <p>
     <strong>English</strong> ·
     <a href="./README_cn.md">简体中文</a>
+  </p>
+  <p>
+    <a href="https://ko-fi.com/mugpeng"><img src="https://img.shields.io/badge/Ko--fi-Buy%20me%20a%20coffee-FF5E5B?style=flat-square&logo=ko-fi&logoColor=white" alt="Ko-fi"></a>
   </p>
   <p>
     <img src="https://img.shields.io/pypi/v/awerouter?style=flat-square&color=7C3AED" alt="Version">
@@ -17,9 +20,6 @@
     <img src="https://img.shields.io/badge/platform-terminal-334155?style=flat-square" alt="Platform">
     <img src="https://img.shields.io/pypi/dm/awerouter?style=flat-square" alt="Downloads">
     <img src="https://img.shields.io/github/stars/mugpeng/awerouter?style=flat-square" alt="Stars">
-  </p>
-  <p>
-    <a href="https://ko-fi.com/mugpeng"><img src="https://img.shields.io/badge/Ko--fi-Buy%20me%20a%20coffee-FF5E5B?style=flat-square&logo=ko-fi&logoColor=white" alt="Ko-fi"></a>
   </p>
 </div>
 
@@ -48,6 +48,40 @@ awerouter serve [cc-router-1]     # shorthand: awerouter cc-router-1
 export ANTHROPIC_BASE_URL=http://127.0.0.1:20128
 # aweswitch profile env: ANTHROPIC_MODEL=auto, _HAIKU_=flash, _OPUS_=pro
 ```
+
+## Let AI Agent Configure
+
+If you are working in Claude Code, Codex, Cursor, or another coding agent, tell it:
+
+```text
+Read https://github.com/mugpeng/awerouter/blob/main/README.ai.md and follow it to install and configure awerouter.
+```
+
+The agent will install the CLI, init config, help you add profiles, and install the awerouter skill via [aweskill](https://aweskill.webioinfo.top/) for ongoing routing management.
+
+**After setup, you can tell the agent things like:**
+
+> "Add a stepfun flash provider and a pro profile."
+> "List my awerouter profiles."
+> "Tune longContextThreshold from my usage."
+> "Explain my usage savings."
+
+The agent can run read-only commands (`list`, `show`, `config show`, `usage stats`, `usage calibrate`, `usage savings`) and edit config, but it will not run `awerouter serve` — that starts a long-lived daemon. Start the daemon in your own terminal:
+
+```bash
+awerouter serve cc-router-1
+```
+
+### awerouter skill
+
+Install the [awerouter skill](https://github.com/mugpeng/awerouter/blob/main/resources/skills/awerouter/SKILL.md) via [aweskill](https://aweskill.webioinfo.top/) to let AI agents manage routing with natural language:
+
+- List, inspect, add, and edit routing profiles
+- Edit `providers.json` (endpoints/auth) and `routing.json` (strategy) separately
+- Read `usage stats` / `usage calibrate` / `usage savings` and suggest threshold changes
+- Guide environment-variable setup for `${ENV_VAR}` auth references
+
+After install, you can tell the agent things like "Add a GLM provider for the openai-chat group", "Raise longContextThreshold to 12000", or "Show me which provider handles my web_search traffic". The agent reads the config, makes changes, and verifies with `awerouter config show` / `awerouter list`.
 
 ## Config
 
@@ -88,7 +122,8 @@ The auth header is **auto-detected from `base_url`**: `anthropic.com` → `x-api
 {
   "settings": {
     "backgroundModel": "flash",
-    "thinkModel": "pro"
+    "thinkModel": "pro",
+    "webSearchModel": "pro"
   },
   "cc-router-1": {
     "protocol": "anthropic",
@@ -101,7 +136,7 @@ The auth header is **auto-detected from `base_url`**: `anthropic.com` → `x-api
 }
 ```
 
-`settings` is optional (defaults: `flash`/`pro`). It defines the model ids CC sends for background (Haiku) and think (Opus) tiers. The main loop uses `auto` — routed by difficulty by L3. Set these in your aweswitch profile: `ANTHROPIC_DEFAULT_HAIKU_MODEL=flash`, `ANTHROPIC_MODEL=auto`, `ANTHROPIC_DEFAULT_OPUS_MODEL=pro`.
+`settings` is optional (defaults: `flash`/`pro`). It maps the model ids CC sends for the background (Haiku) and think (Opus) tiers, plus the `webSearchModel` destination for L1 web_search traffic (default `pro`). The main loop uses `auto` — routed by difficulty by L3. Set these in your aweswitch profile: `ANTHROPIC_DEFAULT_HAIKU_MODEL=flash`, `ANTHROPIC_MODEL=auto`, `ANTHROPIC_DEFAULT_OPUS_MODEL=pro`.
 
 Keys reference `${ENV_VAR}` syntax. Missing env vars die with a clear message at startup.
 
@@ -113,7 +148,7 @@ Three-layer first-match-wins pipeline, evaluated per request:
 
 | Layer | Signal | Decision |
 |-------|--------|----------|
-| L1 Capability | `web_search` tool in body | **pro** (flash can't run it) |
+| L1 Capability | `web_search` tool in body | `settings.webSearchModel` (default **pro**) |
 | L2 Tier label | `model == c1/flash` or `c1/think` | flash / pro respectively |
 | L3 Difficulty | token count > threshold, or has image | **pro**; else **flash** |
 
