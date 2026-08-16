@@ -1,18 +1,23 @@
 # Changelog
 
-## Unreleased
+## v0.1.5 - 2026-08-16
 
-Code-quality hardening pass (no behavior change on the happy path).
+Multi-provider profile-based routing, interactive onboarding, and code-quality hardening.
+
+### Highlights
+- **Agent-grouped providers**: `providers.json` now groups providers by agent (`claude` / `codex` / `opencode`), and each routing profile declares its `agent`, making it possible to route different agent types through the same daemon.
+- **Configurable web_search routing**: L1 `web_search` destination is no longer hard-coded to `pro`; it now follows `settings.webSearchModel`, so operators can redirect it independently.
+- **Interactive profile wizard**: `awerouter add` walks users through profile creation step by step, auto-creating any new providers with `${VAR}` auth references and keeping `providers.json` / `routing.json` references consistent.
+- **Profile management commands**: `awerouter list` (one-line overview), `awerouter show [PROFILE]` (redacted single-profile or full-config view), and `awerouter <PROFILE>` shorthand for `serve <PROFILE>`.
 
 ### Fixed / Hardened
 - `_proxy_request` no longer mutates the request body in place (shallow copy per upstream attempt).
-- `Destination` is pure data again: provider resolution happens at the call site, removing the two-phase init and the lying `ResolveResult.provider` type.
 - `detect_auth_header` matches the URL netloc instead of a substring — `https://evil.com/anthropic.com` no longer misdetected as Anthropic.
-- `config show` now cross-validates routing.json destinations against providers.json, so bad references fail immediately instead of on first request.
+- `config show` now cross-validates `routing.json` destinations against `providers.json`, so bad references fail immediately instead of on first request.
+- Network-level upstream failures now append a status-502 entry to the request log instead of leaving no trace.
 
 ### Added
 - `serve` warns at startup when shell proxy vars are set without loopback exempted in `no_proxy` — the cause of empty-body 502s from proxied clients.
-- Network-level upstream failures are now logged (status 502) instead of vanishing from `awerouter log`.
 - `awerouter init` — top-level alias for `config init`.
 - `awerouter add` — interactive wizard that builds a routing profile step by step, creating any new providers (auth stored as `${VAR}` refs) and keeping the two-file references consistent.
 - `awerouter list` — one-line-per-profile overview (name, agent, flash, pro, threshold).
