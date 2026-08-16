@@ -2,12 +2,13 @@
 
 import asyncio
 import os
+import socket
 
 import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from awerouter.server import create_app
+from awerouter.server import _loopback_proxy_warning, create_app
 from awerouter.types import Destination, Provider, RoutingProfile, Settings
 
 
@@ -330,3 +331,55 @@ class TestAwerouter:
             finally:
                 await up_server.close()
         run(t())
+
+    def test_network_error_returns_502_and_logs(self):
+        async def t():
+            s = socket.socket()
+            s.bind(("127.0.0.1", 0))
+            dead_port = s.getsockname()[1]
+            s.close()
+
+            providers = {
+                "dead": Provider("dead", f"http://127.0.0.1:{dead_port}", "k"),
+            }
+            profile = RoutingProfile("t", "claude", 32, {
+                "flash": Destination("dead", "m1"),
+                "pro": Destination("dead", "m2"),
+            })
+            app = create_app(providers, profile, SETTINGS)
+            async with TestClient(TestServer(app)) as c:
+                r = await c.post("/v1/messages", json={
+                    "model": "flash",  # L2 background -> flash (dead) -> fallback pro (dead) -> 502
+                    "messages": [{"role": "user", "content": "hi"}],
+                })
+                assert r.status == 502
+            from awerouter.logging import tail
+            entries = tail(5)
+            assert any(e.status == 502 for e in entries), entries
+        run(t())
+
+
+class TestLoopbackProxyWarning:
+    _PROXY_VARS = ("http_proxy", "HTTP_PROXY", "https_proxy",
+                   "HTTPS_PROXY", "all_proxy", "ALL_PROXY",
+                   "no_proxy", "NO_PROXY")
+
+    def _clear_env(self, monkeypatch):
+        for k in self._PROXY_VARS:
+            monkeypatch.delenv(k, raising=False)
+
+    def test_no_proxy_env(self, monkeypatch):
+        self._clear_env(monkeypatch)
+        assert _loopback_proxy_warning() is None
+
+    def test_proxy_without_loopback_exemption_warns(self, monkeypatch):
+        self._clear_env(monkeypatch)
+        monkeypatch.setenv("http_proxy", "http://127.0.0.1:7890")
+        w = _loopback_proxy_warning()
+        assert w is not None and "no_proxy" in w
+
+    def test_proxy_with_no_proxy_loopback_ok(self, monkeypatch):
+        self._clear_env(monkeypatch)
+        monkeypatch.setenv("http_proxy", "http://127.0.0.1:7890")
+        monkeypatch.setenv("no_proxy", "127.0.0.1,localhost")
+        assert _loopback_proxy_warning() is None

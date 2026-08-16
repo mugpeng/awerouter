@@ -11,6 +11,8 @@ Code-quality hardening pass (no behavior change on the happy path).
 - `config show` now cross-validates routing.json destinations against providers.json, so bad references fail immediately instead of on first request.
 
 ### Added
+- `serve` warns at startup when shell proxy vars are set without loopback exempted in `no_proxy` — the cause of empty-body 502s from proxied clients.
+- Network-level upstream failures are now logged (status 502) instead of vanishing from `awerouter log`.
 - `awerouter init` — top-level alias for `config init`.
 - `awerouter add` — interactive wizard that builds a routing profile step by step, creating any new providers (auth stored as `${VAR}` refs) and keeping the two-file references consistent.
 - `awerouter list` — one-line-per-profile overview (name, agent, flash, pro, threshold).

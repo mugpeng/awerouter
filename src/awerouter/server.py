@@ -121,6 +121,25 @@ class _RoutingState:
         self.streaming_started = False
 
 
+def _log_failure(state: _RoutingState, request_id: str, t0: float, status: int) -> None:
+    """Log requests that never got an upstream response (502 path)."""
+    dest = state.profile.destinations[state.result.destination]
+    ensure_log_dir()
+    append(RequestLog(
+        ts=_now_iso(),
+        request_id=request_id,
+        model_in=state.inbound_model or "<none>",
+        label=state.result.label,
+        destination=state.result.destination,
+        provider=dest.provider_name,
+        model_out=dest.model,
+        status=status,
+        ms=int((time.monotonic() - t0) * 1000),
+        bytes=0,
+        token_count=state.result.inspect.token_count,
+    ))
+
+
 async def handle_messages(request: web.Request) -> web.StreamResponse:
     providers: dict = request.app["providers"]
     profile = request.app["profile"]
@@ -156,6 +175,7 @@ async def handle_messages(request: web.Request) -> web.StreamResponse:
             if dest_key == "flash" and state.attempt == 1:
                 state.result = _fallback_result(state)
                 continue
+            _log_failure(state, request_id, t0, 502)
             raise web.HTTPBadGateway(
                 text=json.dumps({"error": {"message": f"upstream error: {exc}"}}),
                 content_type="application/json",
@@ -292,6 +312,30 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _loopback_proxy_warning() -> "str | None":
+    """Warn when shell proxy vars would hijack loopback traffic to awerouter.
+
+    Clients honor http_proxy/https_proxy/all_proxy; without 127.0.0.1 in
+    no_proxy, requests to awerouter get routed into the proxy — whose own
+    127.0.0.1 is itself — so they fail to connect and come back as 502
+    with an empty body.
+    """
+    has_proxy = any(
+        os.environ.get(k) for k in
+        ("http_proxy", "HTTP_PROXY", "https_proxy", "HTTPS_PROXY", "all_proxy", "ALL_PROXY")
+    )
+    if not has_proxy:
+        return None
+    no_proxy = (os.environ.get("no_proxy") or os.environ.get("NO_PROXY") or "").lower()
+    if "127.0.0.1" in no_proxy or "localhost" in no_proxy:
+        return None
+    return (
+        "warning: proxy env vars are set, but no_proxy does not exempt loopback\n"
+        "  (clients will route awerouter traffic into the proxy and get empty 502s)\n"
+        "  fix: export no_proxy=127.0.0.1,localhost NO_PROXY=127.0.0.1,localhost"
+    )
+
+
 def create_app(providers: dict, profile, settings) -> web.Application:
     app = web.Application()
     app["providers"] = providers
@@ -339,6 +383,10 @@ async def _serve(host: str, port: int, providers: dict, profile, settings) -> No
     print(f"  tier env: ANTHROPIC_MODEL=auto  "
           f"ANTHROPIC_DEFAULT_HAIKU_MODEL={settings.background_model}  "
           f"ANTHROPIC_DEFAULT_OPUS_MODEL={settings.think_model}")
+    warning = _loopback_proxy_warning()
+    if warning:
+        print()
+        print(warning)
     try:
         await asyncio.Event().wait()
     except asyncio.CancelledError:

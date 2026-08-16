@@ -78,7 +78,7 @@ def add():
     name = click.prompt("Profile name")
     if name in profiles:
         die(f"profile already exists: {name}")
-    agent = click.prompt("Agent group (providers.json key)", default="claude")
+    agent = click.prompt("Agent group", type=click.Choice(["claude", "codex", "opencode"]), default="claude")
     known = set(providers_all.get(agent, {}))
 
     def ask_tier(tier: str) -> str:

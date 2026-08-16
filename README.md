@@ -119,6 +119,16 @@ awerouter calibrate
 
 `calibrate` shows the message-token distribution of L3 traffic (the threshold-sensitive layer; messages only — system prompt and tools are excluded) and suggests candidate `longContextThreshold` values at p90/p95/p99. Run it after some real traffic, then edit `routing.json`.
 
+## Troubleshooting
+
+**CC shows `502 status code (no body)` right after launch** — a shell proxy (Clash etc.) is hijacking loopback traffic. Requests to `127.0.0.1:20128` go into the proxy, whose `127.0.0.1` is itself, so nothing is listening and the proxy returns an empty 502. `serve` prints a warning when it detects this; fix it by exempting loopback in your shell config:
+
+```bash
+export no_proxy=127.0.0.1,localhost NO_PROXY=127.0.0.1,localhost
+```
+
+Then open a new terminal and relaunch CC.
+
 ## Development
 
 ```bash

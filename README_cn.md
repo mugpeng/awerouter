@@ -119,6 +119,16 @@ awerouter calibrate
 
 `calibrate` 展示 L3 流量（受阈值影响的层）的消息 token 分布（仅统计 messages，不含 system prompt 与 tools 定义），并在 p90/p95/p99 处建议 `longContextThreshold` 候选值。跑一段真实流量后执行，再编辑 `routing.json`。
 
+## 故障排查
+
+**CC 启动后立刻报 `502 status code (no body)`** —— shell 代理（Clash 等）劫持了回环流量。发往 `127.0.0.1:20128` 的请求被送进代理，而代理的 `127.0.0.1` 是它自己，端口上没人监听，代理就返回空的 502。`serve` 检测到这种情况会在启动时打印警告；在 shell 配置里豁免回环地址即可：
+
+```bash
+export no_proxy=127.0.0.1,localhost NO_PROXY=127.0.0.1,localhost
+```
+
+然后开新终端、重新启动 CC。
+
 ## 开发
 
 ```bash
