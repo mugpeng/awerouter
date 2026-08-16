@@ -1,3 +1,4 @@
+import difflib
 import json
 import os
 import re
@@ -347,13 +348,17 @@ def format_routing_display(settings: Settings, profiles: dict[str, RoutingProfil
 # Click CLI
 # ---------------------------------------------------------------------------
 
-class ProfileGroup(click.Group):
-    """Group where an unknown subcommand is treated as a profile name:
-    `awerouter cc-router-1` == `awerouter serve cc-router-1`.
+def _close_command(group: click.Group, ctx, cmd_name: str) -> "str | None":
+    """Closest real command name for a typo'd token, or None."""
+    names = [c for c in group.list_commands(ctx) if not c.startswith("__")]
+    close = difflib.get_close_matches(cmd_name, names, n=1, cutoff=0.8)
+    return close[0] if close else None
 
-    Defined commands always win, so profiles named after commands are
-    unreachable via the shorthand (use `serve <name>` for those).
-    """
+
+class SuggestGroup(click.Group):
+    """Group that turns unknown subcommands into friendly errors:
+    a close match gets a did-you-mean suggestion, anything else gets a
+    pointer to `-h` — never a bare usage error."""
 
     def resolve_command(self, ctx, args):
         try:
@@ -361,9 +366,72 @@ class ProfileGroup(click.Group):
         except click.UsageError:
             if not args:
                 raise
-            ctx.meta["profile_name"] = args[0]
+            cmd_name = args[0]
+            close = _close_command(self, ctx, cmd_name)
+            if close:
+                ctx.fail(
+                    f"unknown command '{cmd_name}' — did you mean '{close}'? "
+                    f"(run {ctx.command_path} -h for usage)"
+                )
+            ctx.fail(
+                f"unknown command '{cmd_name}' — "
+                f"run {ctx.command_path} -h to list commands"
+            )
+
+
+class ProfileGroup(SuggestGroup):
+    """Group where an unknown subcommand is treated as a profile name:
+    `awerouter cc-router-1` == `awerouter serve cc-router-1`.
+
+    Defined commands always win, so profiles named after commands are
+    unreachable via the shorthand (use `serve <name>` for those). A token that
+    closely resembles a real command (e.g. `server` vs `serve`) is reported as
+    a typo instead of being taken as a profile name; a bare unknown token with
+    extra positional arguments can't be a profile launch either, so it gets
+    the -h pointer.
+    """
+
+    def resolve_command(self, ctx, args):
+        try:
+            # Bypass SuggestGroup: unknown tokens may be profile names.
+            return click.Group.resolve_command(self, ctx, args)
+        except click.UsageError:
+            if not args:
+                raise
+            cmd_name = args[0]
+            close = _close_command(self, ctx, cmd_name)
+            if close:
+                ctx.fail(
+                    f"unknown command '{cmd_name}' — did you mean '{close}'? "
+                    f"(to start a profile: awerouter serve <profile> or awerouter <profile>)"
+                )
+            if self._has_stray_positionals(args[1:]):
+                ctx.fail(
+                    f"unknown command '{cmd_name}' — run {ctx.command_path} -h to list commands"
+                )
+            ctx.meta["profile_name"] = cmd_name
             command = self.get_command(ctx, "__serve_profile__")
             return args[0], command, args[1:]
+
+    @staticmethod
+    def _has_stray_positionals(rest: list) -> bool:
+        """True when any arg is a positional, not an option or an option value.
+
+        The bare-profile launch only accepts --port/--host, so leftover
+        positionals mean this can't be a valid profile invocation.
+        """
+        expect_value = False
+        for a in rest:
+            if expect_value:
+                expect_value = False
+                continue
+            if a in ("--port", "--host"):
+                expect_value = True
+                continue
+            if a.startswith("-"):
+                continue
+            return True
+        return False
 
 
 @click.group(
@@ -375,7 +443,7 @@ def cli():
     """Smart LLM router: fast cheap tasks to flash, hard decisions to pro."""
 
 
-@cli.group(context_settings={"help_option_names": ["-h", "--help"]})
+@cli.group(cls=SuggestGroup, context_settings={"help_option_names": ["-h", "--help"]})
 def config():
     """Manage awerouter config."""
 

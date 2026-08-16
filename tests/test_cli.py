@@ -274,3 +274,47 @@ class TestBareProfileLaunch:
         r = CliRunner().invoke(cli, ["list"])
         assert r.exit_code == 0
         assert calls == []  # list ran, serve never did
+
+
+class TestCommandSuggestions:
+    def test_top_level_typo_suggests_serve(self, tmp_path, monkeypatch):
+        _setup(tmp_path, monkeypatch, _providers(), _routing())
+        r = CliRunner().invoke(cli, ["server", "cc-1"])
+        assert r.exit_code != 0
+        assert "did you mean 'serve'" in r.output
+
+    def test_subgroup_typo_suggests_subcommand(self, tmp_path, monkeypatch):
+        _setup(tmp_path, monkeypatch, _providers(), _routing())
+        r = CliRunner().invoke(cli, ["usage", "statsx"])
+        assert r.exit_code != 0
+        assert "did you mean 'stats'" in r.output
+
+    def test_config_group_typo_suggests_subcommand(self, tmp_path, monkeypatch):
+        _setup(tmp_path, monkeypatch, _providers(), _routing())
+        r = CliRunner().invoke(cli, ["config", "sho"])
+        assert r.exit_code != 0
+        assert "did you mean 'show'" in r.output
+
+    def test_far_off_typo_points_to_help(self, tmp_path, monkeypatch):
+        """No close match + extra positional args: -h hint, not a raw
+        'unexpected extra argument' error."""
+        _setup(tmp_path, monkeypatch, _providers(), _routing())
+        r = CliRunner().invoke(cli, ["zzzzqqq", "blah"])
+        assert r.exit_code != 0
+        assert "-h" in r.output
+        assert "unexpected extra argument" not in r.output
+
+    def test_subgroup_far_off_typo_points_to_help(self, tmp_path, monkeypatch):
+        _setup(tmp_path, monkeypatch, _providers(), _routing())
+        r = CliRunner().invoke(cli, ["usage", "zzzzqqq"])
+        assert r.exit_code != 0
+        assert "-h to list commands" in r.output
+
+    def test_valid_profile_still_launches(self, tmp_path, monkeypatch):
+        """The suggestion layer must not break the bare-profile shorthand."""
+        _setup(tmp_path, monkeypatch, _providers(), _routing())
+        calls = []
+        monkeypatch.setattr("awerouter.cli._run_serve", lambda p, port, host: calls.append((p, port, host)))
+        r = CliRunner().invoke(cli, ["cc-2"])
+        assert r.exit_code == 0, r.output
+        assert calls == [("cc-2", 20128, "127.0.0.1")]

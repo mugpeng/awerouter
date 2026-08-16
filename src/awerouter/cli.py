@@ -8,6 +8,7 @@ import asyncio
 import click
 
 from awerouter.config import (
+    SuggestGroup,
     cli as config_cli,
     config_dir,
     die,
@@ -225,7 +226,7 @@ def _window_cutoff(since, profile_name):
     return cutoff
 
 
-@cli.group(invoke_without_command=True)
+@cli.group(cls=SuggestGroup, invoke_without_command=True)
 @click.option("--since", default=None,
               help="Count entries from this point on: 'today', 'yesterday', Nd (e.g. 7d), or YYYY-MM-DD.")
 @click.option("--profile", "profile_name", default=None, help="Count entries for one routing profile only.")
