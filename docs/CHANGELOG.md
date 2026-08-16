@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.3.5 - 2026-08-17
+
+### Changed
+- `config show [PROFILE]`: single-profile redacted view (the providers it uses + its routing entry); no argument keeps the full-config view.
+- `config path` prints both config file paths (`providers.json`, `routing.json`) instead of the config directory.
+- `config edit` opens `providers.json` or `routing.json` — the file is an optional argument (`providers` / `routing`) or an interactive choice — instead of opening the config directory; snapshots the file to `.bak` first.
+- `awerouter add` wizard: prints a `providers.json` category overview, and provider selection is a choice list over the category's existing providers (`<new>` adds one) instead of free text with a hint.
+- Removed `config init` (use top-level `awerouter init`); error hints updated to match.
+- **Version single-sourced** in `awerouter.__version__`: `pyproject.toml` reads it dynamically (`tool.setuptools.dynamic`) and the serve banner/`GET /` import it, so a release bump touches exactly one file instead of three lockstep edits (v0.3.1 had bumped `pyproject.toml`, `__init__.py`, and `server.py` in unison).
+- **`usage` window options moved onto the subcommands**: `--since` and `--profile` are now options of `log`, `stats`, `calibrate`, and `savings` (`awerouter usage stats --since today`), no longer sitting between `usage` and the subcommand. `clean` takes no window options — it deletes the whole log either way.
+
+### Added
+- **Predictable port allocation**: optional `port` field in a `routing.json` profile pins its listen port; precedence `--port` flag > profile `port` > 20128 default. An explicitly chosen port that is already in use now fails loudly (clients hardcode it) instead of silently drifting to a random port. Without a configured port, serve scans upward from 20128 for the first free port — the first instance gets 20128, the next 20129, in start order — replacing the old random-port fallback, so parallel instances land on predictable sequential ports. `awerouter list` and `config show` display the port, and the serve banner notes when it came from `routing.json`.
+- `awerouter restore [providers|routing]`: restore a config file from its `.bak` backup. Backups are single-slot (aweswitch convention) and written by `config edit` and the `add` wizard before every write.
+- `usage clean`: deletes saved request logs after a confirmation prompt — moved off `usage stats --clean` so `stats` stays read-only.
+- Request log records `protocol` and `agent` per request. Protocol is the wire protocol served; agent is the calling client normalized from its `User-Agent` header (`claude-cli/...` → `claude-code`, `codex_cli_rs/...` → `codex`, `opencode/...` → `opencode`; unknown clients keep their first UA token) — awerouter only sees the wire request, so the UA is the only place caller identity exists. `usage log` shows both columns; `usage stats` labels each profile with its protocol and adds a `by_agent` breakdown. Legacy entries without the fields keep parsing (shown as `-` / `(unknown)`).
+
 ## Unreleased
 
 ### Changed
