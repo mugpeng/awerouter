@@ -7,6 +7,8 @@ Three-layer first-match-wins pipeline:
   L3 Difficulty score  — long context / image -> pro; default -> flash (cost-first)
 """
 
+from __future__ import annotations
+
 import re
 
 from awerouter.types import Destination, InspectResult, ResolveResult

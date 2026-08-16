@@ -5,6 +5,8 @@ providers based on structural request signals. Opaque SSE proxy; no request
 body parsing on the response path.
 """
 
+from __future__ import annotations
+
 import asyncio
 import json
 import os
