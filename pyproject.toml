@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "awerouter"
-version = "0.3.1"
+dynamic = ["version"]
 description = "Smart LLM router: fast cheap tasks to flash, hard decisions to pro."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -34,6 +34,9 @@ awerouter = "awerouter.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.dynamic]
+version = { attr = "awerouter.__version__" }
 
 [tool.setuptools.package-data]
 awerouter = ["py.typed", "default-providers.json", "default-routing.json"]

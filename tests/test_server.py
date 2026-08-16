@@ -8,6 +8,7 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
+from awerouter import __version__
 from awerouter.server import _agent_from_ua, _loopback_proxy_warning, _serve, create_app
 from awerouter.types import Destination, Provider, RoutingProfile, Settings
 
@@ -52,6 +53,7 @@ class TestAwerouter:
                 assert r.status == 200
                 d = await r.json()
                 assert d["name"] == "awerouter"
+                assert d["version"] == __version__  # single-sourced, never hardcoded here
                 assert "POST /v1/messages" in d["endpoints"]
                 assert "POST /v1/chat/completions" in d["endpoints"]
                 assert "POST /v1/responses" in d["endpoints"]
@@ -563,15 +565,25 @@ class TestLoopbackProxyWarning:
         assert _loopback_proxy_warning() is None
 
 
-class TestServePortConflict:
-    """An explicitly chosen port must die on conflict; the implicit default
-    keeps the random-free-port fallback."""
+class TestServePortBinding:
+    """Explicit ports die on conflict; the implicit default scans upward
+    from the requested port (20128, 20129, ...) in start order."""
 
-    def _occupied_port(self):
+    def _occupied_port(self, port=0):
         s = socket.socket()
-        s.bind(("127.0.0.1", 0))
+        s.bind(("127.0.0.1", port))
         s.listen(1)
         return s, s.getsockname()[1]
+
+    def _serve_briefly(self, port, **kwargs):
+        """Run _serve briefly, cancel, return captured stdout."""
+        async def t():
+            task = asyncio.ensure_future(
+                _serve("127.0.0.1", port, _providers(0), ROUTING, SETTINGS, **kwargs))
+            await asyncio.sleep(0.5)
+            task.cancel()
+            await task
+        asyncio.run(t())
 
     def test_explicit_port_conflict_dies(self):
         s, port = self._occupied_port()
@@ -582,21 +594,20 @@ class TestServePortConflict:
         finally:
             s.close()
 
-    def test_implicit_port_conflict_falls_back(self, capsys):
+    def test_implicit_default_taken_when_free(self, capsys):
+        s, free = self._occupied_port()
+        s.close()  # release; serve should take exactly this port back
+        self._serve_briefly(free)
+        out = capsys.readouterr().out
+        assert f"listening on 127.0.0.1:{free}" in out
+        assert "using next free port" not in out
+
+    def test_implicit_port_increments_when_busy(self, capsys):
         s, port = self._occupied_port()
         try:
-            async def t():
-                # _serve swallows CancelledError (graceful shutdown), so cancel
-                # explicitly after it has had time to bind and print.
-                task = asyncio.ensure_future(
-                    _serve("127.0.0.1", port, _providers(0), ROUTING, SETTINGS))
-                await asyncio.sleep(0.5)
-                task.cancel()
-                await task
-
-            asyncio.run(t())
+            self._serve_briefly(port)
             out = capsys.readouterr().out
-            assert "listening on" in out
-            assert f"listening on 127.0.0.1:{port}" not in out  # moved off the busy port
+            assert f"port {port} busy; using next free port {port + 1}" in out
+            assert f"listening on 127.0.0.1:{port + 1}" in out
         finally:
             s.close()

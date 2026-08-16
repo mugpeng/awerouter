@@ -9,6 +9,7 @@ request body parsing on the response path.
 from __future__ import annotations
 
 import asyncio
+import errno
 import json
 import os
 import time
@@ -17,6 +18,7 @@ import uuid
 import aiohttp
 from aiohttp import web
 
+from awerouter import __version__
 from awerouter.config import die, expand_value
 from awerouter.logging import append, ensure_log_dir
 from awerouter.protocols import ENDPOINT_PATHS, extract
@@ -423,7 +425,7 @@ def create_app(providers: dict, profile, settings) -> web.Application:
     app["providers"] = providers
     app["profile"] = profile
     app["settings"] = settings
-    app["version"] = "0.3.1"
+    app["version"] = __version__
 
     session = aiohttp.ClientSession()
     app["session"] = session
@@ -473,26 +475,50 @@ def _client_hint(protocol: str, display_host: str, port: int, settings) -> str:
     )
 
 
+# How far past the default port an implicit serve scans before giving up.
+_PORT_SCAN_SPAN = 100
+
+
 async def _serve(host: str, port: int, providers: dict, profile, settings,
                  port_explicit: bool = False) -> None:
     app = create_app(providers, profile, settings)
     runner = web.AppRunner(app)
     await runner.setup()
-    try:
-        site = web.TCPSite(runner, host=host, port=port)
+
+    async def _bind(p: int) -> web.TCPSite:
+        site = web.TCPSite(runner, host=host, port=p)
         await site.start()
-    except OSError:
+        return site
+
+    site = None
+    if port_explicit:
         # An explicitly chosen port (--port or the profile's port field) must
-        # not silently move: clients hardcode it. Only the implicit default
-        # falls back to a random free port.
-        if port_explicit:
+        # not silently move: clients hardcode it.
+        try:
+            site = await _bind(port)
+        except OSError:
             await runner.cleanup()
             die(
                 f"port {port} is already in use — another awerouter (or process) is holding it.\n"
                 f"  stop it first, or launch with a different --port"
             )
-        site = web.TCPSite(runner, host=host, port=0)
-        await site.start()
+    else:
+        # Implicit default: take the first free port scanning up from it, so
+        # concurrent instances get predictable sequential ports (20128, 20129,
+        # ...) in start order instead of random ones.
+        for candidate in range(port, port + _PORT_SCAN_SPAN):
+            try:
+                site = await _bind(candidate)
+                if candidate != port:
+                    print(f"  note         -> port {port} busy; using next free port {candidate}")
+                break
+            except OSError as exc:
+                if exc.errno != errno.EADDRINUSE:
+                    await runner.cleanup()
+                    die(f"cannot bind {host}:{candidate}: {exc}")
+    if site is None:
+        await runner.cleanup()
+        die(f"no free port in {port}-{port + _PORT_SCAN_SPAN - 1}; pass --port explicitly")
     actual_port = site._server.sockets[0].getsockname()[1]
     print(f"awerouter listening on {host}:{actual_port}  [{profile.name}]")
     print(f"  protocol      -> {profile.protocol}")
