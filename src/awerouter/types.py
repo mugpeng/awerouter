@@ -64,7 +64,8 @@ class RequestLog:
     provider: str
     model_out: str
     status: Optional[int]
-    ms: int
+    ms: int                                   # time to first response byte
     bytes: int
     token_count: int
     profile: str = ""
+    duration_ms: int = 0                      # full request duration incl. streaming (0 = not recorded)

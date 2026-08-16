@@ -57,6 +57,7 @@ def append(log: RequestLog) -> None:
             "model_out": log.model_out,
             "status": log.status,
             "ms": log.ms,
+            "duration_ms": log.duration_ms,
             "bytes": log.bytes,
             "token_count": log.token_count,
         }, ensure_ascii=False) + "\n")
@@ -103,6 +104,7 @@ def tail(n: int = 20) -> list[RequestLog]:
                 model_out=data.get("model_out", ""),
                 status=data.get("status"),
                 ms=data.get("ms", 0),
+                duration_ms=data.get("duration_ms", 0),
                 bytes=data.get("bytes", 0),
                 token_count=data.get("token_count", 0),
             ))
@@ -111,7 +113,7 @@ def tail(n: int = 20) -> list[RequestLog]:
     return result
 
 
-def token_totals() -> dict:
+def token_totals(since=None, profile=None) -> dict:
     """Count requests and message tokens by destination, plus fallback count.
 
     Input-side accounting for `savings`: message tokens of flash-served requests
@@ -132,6 +134,8 @@ def token_totals() -> dict:
             data = json.loads(line)
         except json.JSONDecodeError:
             continue
+        if not _passes(data, since, profile):
+            continue
         dest = data.get("destination", "")
         if dest in out:
             out[dest]["requests"] += 1
@@ -143,7 +147,7 @@ def token_totals() -> dict:
     return out
 
 
-def cadence() -> dict:
+def cadence(since=None, profile=None) -> dict:
     """Switch cadence vs cache TTL, for the savings cache-sensitivity view.
 
     Anthropic-style prompt caches live ~5 minutes. The cost of interleaving
@@ -162,6 +166,8 @@ def cadence() -> dict:
             data = json.loads(line)
             ts = datetime.fromisoformat(data["ts"])
         except (json.JSONDecodeError, KeyError, ValueError):
+            continue
+        if not _passes(data, since, profile):
             continue
         rows.append((ts, data.get("destination", "")))
     rows.sort()
@@ -203,7 +209,8 @@ def _new_profile_bucket() -> dict:
         "by_destination": {},
         "by_provider": {},
         "by_model": {},
-        "ms": {"flash": [], "pro": []},
+        # (first-byte ms, total ms) samples per breakdown dimension
+        "_ms": {"destination": {}, "provider": {}, "model": {}},
     }
 
 
@@ -217,6 +224,35 @@ def _entry_ts(data: dict):
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt
+
+
+def _passes(data: dict, since, profile) -> bool:
+    """Shared window/profile filter for all analytics readers."""
+    if since is not None:
+        ts = _entry_ts(data)
+        if ts is None or ts < since:
+            return False
+    if profile is not None and (data.get("profile", "") or "(unknown)") != profile:
+        return False
+    return True
+
+
+def log_start():
+    """Timestamp of the oldest retained entry (coverage floor for windows)."""
+    f = _log_file()
+    if not f.exists():
+        return None
+    with open(f, "r", encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                data = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            return _entry_ts(data)
+    return None
 
 
 def _percentile(values: list, p: int):
@@ -279,15 +315,24 @@ def stats(since=None, profile=None) -> dict:
         if dest == "flash":
             bucket["flash_tokens"] += tokens
             bucket["flash_requests"] += 1
-        if dest in bucket["ms"]:
-            bucket["ms"][dest].append(data.get("ms", 0))
+        sample = (data.get("ms", 0), data.get("duration_ms", 0))
+        for dim, key in (("destination", dest), ("provider", prov), ("model", model)):
+            bucket["_ms"][dim].setdefault(key, []).append(sample)
         total_tokens += tokens
         total_requests += 1
     for bucket in by_profile.values():
-        latency = {}
-        for dest, values in bucket.pop("ms").items():
-            if values:
-                latency[dest] = {"p50": _percentile(values, 50), "p95": _percentile(values, 95)}
+        latency: dict = {}
+        for dim, groups in bucket.pop("_ms").items():
+            for key, samples in groups.items():
+                entry = {
+                    "p50": _percentile([m for m, _ in samples], 50),
+                    "p95": _percentile([m for m, _ in samples], 95),
+                }
+                durations = [d for _, d in samples if d]
+                if durations:
+                    entry["total_p50"] = _percentile(durations, 50)
+                    entry["total_p95"] = _percentile(durations, 95)
+                latency.setdefault(dim, {})[key] = entry
         bucket["latency"] = latency
     return {
         "total_requests": total_requests,
@@ -319,7 +364,7 @@ def clear_logs() -> list:
 _L3_LABELS = frozenset({"default", "longContext", "image"})
 
 
-def token_distribution() -> dict:
+def token_distribution(since=None, profile=None) -> dict:
     """Token distribution of L3 traffic for calibrating longContextThreshold.
 
     Only L3 requests (label in default/longContext/image) are threshold-sensitive;
@@ -335,6 +380,8 @@ def token_distribution() -> dict:
         try:
             data = json.loads(line)
         except json.JSONDecodeError:
+            continue
+        if not _passes(data, since, profile):
             continue
         if data.get("label", "") not in _L3_LABELS:
             continue

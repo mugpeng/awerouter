@@ -253,6 +253,7 @@ async def _proxy_flow(request: web.Request, endpoint_protocol: str) -> web.Strea
             model_out=dest.model,
             status=status,
             ms=ms,
+            duration_ms=int((time.monotonic() - t0) * 1000),
             bytes=byte_count,
             token_count=state.result.inspect.token_count,
             profile=profile.name,

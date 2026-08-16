@@ -146,10 +146,7 @@ def show(profile):
     click.echo(format_routing_display(settings, {profile: p}))
 
 
-@cli.command()
-@click.option("--lines", default=20, show_default=True, help="Tail N entries.")
-def log(lines: int):
-    """Show recent request logs."""
+def _usage_tail(lines: int):
     from awerouter.logging import tail
     entries = tail(lines)
     if not entries:
@@ -157,10 +154,11 @@ def log(lines: int):
         return
     for e in entries:
         status_s = str(e.status) if e.status is not None else "-"
+        dur_s = f"/{_fmt_ms(e.duration_ms)}" if e.duration_ms else ""
         click.echo(
             f"{e.ts}  {e.request_id[:12]:12s}  {e.destination:7s}  "
             f"{e.provider:12s}  {e.model_out:24s}  {e.label:14s}  "
-            f"status={status_s:>3}  {e.ms}ms  {e.bytes}B  "
+            f"status={status_s:>3}  {_fmt_ms(e.ms)}{dur_s}  "
             f"tokens={e.token_count}  in={e.model_in}"
         )
 
@@ -202,15 +200,64 @@ def _echo_counts(counts: dict, total: int) -> None:
         click.echo(f"    {k:24s} {v} ({pct}%)")
 
 
-@cli.command()
+def _lat_suffix(entry) -> str:
+    if not entry:
+        return ""
+    s = f"  p50 {_fmt_ms(entry['p50'])}  p95 {_fmt_ms(entry['p95'])}"
+    if "total_p50" in entry:
+        s += f"   total p50 {_fmt_ms(entry['total_p50'])}  p95 {_fmt_ms(entry['total_p95'])}"
+    return s
+
+
+def _window_cutoff(since, profile_name):
+    """Echo the active window/profile (and coverage floor); return the cutoff."""
+    cutoff = _parse_since(since) if since else None
+    if since:
+        click.echo(f"window         : since {cutoff:%Y-%m-%d %H:%M} local")
+        from awerouter.logging import log_start
+        start = log_start()
+        if start and start > cutoff:
+            click.echo(
+                f"note           : log starts {start:%Y-%m-%d %H:%M} UTC — older data rotated away"
+            )
+    if profile_name:
+        click.echo(f"profile        : {profile_name}")
+    return cutoff
+
+
+@cli.group(invoke_without_command=True)
 @click.option("--since", default=None,
               help="Count entries from this point on: 'today', 'yesterday', Nd (e.g. 7d), or YYYY-MM-DD.")
 @click.option("--profile", "profile_name", default=None, help="Count entries for one routing profile only.")
+@click.pass_context
+def usage(ctx, since, profile_name):
+    """Usage analytics over the request log (stats is the default view).
+
+    Window options sit between `usage` and the subcommand, e.g.:
+
+    awerouter usage --since today savings
+    """
+    ctx.ensure_object(dict)
+    ctx.obj["since"] = since
+    ctx.obj["profile"] = profile_name
+    if ctx.invoked_subcommand is None:
+        _usage_stats(since, profile_name)
+
+
+@usage.command()
+@click.option("--lines", default=20, show_default=True, help="Tail N entries.")
+def tail(lines: int):
+    """Show recent request log entries verbatim."""
+    _usage_tail(lines)
+
+
+@usage.command()
 @click.option("--clean", is_flag=True, default=False,
               help="Delete saved request logs (asks for confirmation).")
-def stats(since, profile_name, clean):
-    """Show aggregated routing stats, grouped by profile."""
-    from awerouter.logging import clear_logs, stats as _stats
+@click.pass_context
+def stats(ctx, clean):
+    """Routing summary, grouped by profile."""
+    from awerouter.logging import clear_logs
     if clean:
         if click.confirm("Delete all saved request logs (requests.jsonl + rotated backup)?"):
             removed = clear_logs()
@@ -220,15 +267,16 @@ def stats(since, profile_name, clean):
                 click.echo("(no logs to remove)")
             return
         click.echo("aborted — showing stats instead")
-    cutoff = _parse_since(since) if since else None
-    s = _stats(cutoff, profile_name)
+    _usage_stats(ctx.obj["since"], ctx.obj["profile"])
+
+
+def _usage_stats(since, profile_name):
+    from awerouter.logging import stats as collect_stats
+    cutoff = _window_cutoff(since, profile_name)
+    s = collect_stats(cutoff, profile_name)
     if not s:
         click.echo("(no logs yet)")
         return
-    if since:
-        click.echo(f"window         : since {cutoff:%Y-%m-%d %H:%M} local")
-    if profile_name:
-        click.echo(f"profile        : {profile_name}")
     click.echo(f"total_requests : {s['total_requests']}")
     click.echo(f"~total_tokens  : {s['total_tokens']}  (messages only — system prompt & tools excluded)")
     err_pct = round(100 * s["errors"] / s["total_requests"]) if s["total_requests"] else 0
@@ -245,29 +293,34 @@ def stats(since, profile_name, clean):
         extras = (f", {p['errors']} error{'s' if p['errors'] != 1 else ''}"
                   f", {p['fallbacks']} fallback{'s' if p['fallbacks'] != 1 else ''}")
         click.echo(f"profile {name}  ({p['requests']} requests, ~{p['flash_tokens']} flash tokens{extras}):")
+        lat = p["latency"]
         click.echo("  by_label:")
         _echo_counts(p["by_label"], p["requests"])
         click.echo("  by_destination:")
         for k, v in sorted(p["by_destination"].items()):
             pct = round(100 * v / p["requests"]) if p["requests"] else 0
-            lat = p["latency"].get(k)
-            lat_s = f"  p50 {_fmt_ms(lat['p50'])}  p95 {_fmt_ms(lat['p95'])}" if lat else ""
-            click.echo(f"    {k:24s} {v} ({pct}%){lat_s}")
+            click.echo(f"    {k:24s} {v} ({pct}%){_lat_suffix(lat.get('destination', {}).get(k))}")
         click.echo("  by_provider:")
-        _echo_counts(p["by_provider"], p["requests"])
+        for k, v in sorted(p["by_provider"].items()):
+            pct = round(100 * v / p["requests"]) if p["requests"] else 0
+            click.echo(f"    {k:24s} {v} ({pct}%){_lat_suffix(lat.get('provider', {}).get(k))}")
         click.echo("  by_model:")
-        _echo_counts(p["by_model"], p["requests"])
+        for k, v in sorted(p["by_model"].items()):
+            pct = round(100 * v / p["requests"]) if p["requests"] else 0
+            click.echo(f"    {k:24s} {v} ({pct}%){_lat_suffix(lat.get('model', {}).get(k))}")
 
 
-@cli.command()
-def calibrate():
-    """Show L3 token distribution to tune longContextThreshold.
+@usage.command()
+@click.pass_context
+def calibrate(ctx):
+    """Tune longContextThreshold from the L3 token distribution.
 
     Only L3 traffic (default/longContext/image labels) is threshold-sensitive;
     L1 (webSearch) and L2 (background/think) route identically regardless.
     """
     from awerouter.logging import token_distribution
-    d = token_distribution()
+    cutoff = _window_cutoff(ctx.obj["since"], ctx.obj["profile"])
+    d = token_distribution(cutoff, ctx.obj["profile"])
     if not d:
         click.echo("(no L3 traffic yet — run some non-background/think requests first)")
         return
@@ -287,18 +340,17 @@ _CACHE_READ_FACTOR = 0.1
 _CACHE_WRITE_FACTOR = 1.25
 
 
-@cli.command()
-def savings():
-    """Estimate token savings vs a pro-only setup (token view, no prices).
+@usage.command()
+@click.pass_context
+def savings(ctx):
+    """Token accounting vs a pro-only setup (token view, no prices)."""
+    _usage_savings(ctx.obj["since"], ctx.obj["profile"])
 
-    Shows how many message-input tokens each tier consumed, how many pro
-    input tokens routing offloaded to flash, and a cache-sensitivity bracket:
-    offloaded tokens are worth less when a pro-only baseline would have
-    served them as cache reads. Multiply by your providers' input prices
-    yourself for a money estimate.
-    """
+
+def _usage_savings(since, profile_name):
     from awerouter.logging import cadence, token_totals
-    t = token_totals()
+    cutoff = _window_cutoff(since, profile_name)
+    t = token_totals(cutoff, profile_name)
     if not t:
         click.echo("(no logs yet)")
         return
@@ -321,7 +373,7 @@ def savings():
     click.echo(f"  pro input billed   {total_tok:,} → {pro['tokens']:,}")
     click.echo(f"  offloaded to flash {offloaded:,}  ({pct_tok}% of input tokens)")
 
-    c = cadence()
+    c = cadence(cutoff, profile_name)
     if c and c["requests"] > 1 and offloaded:
         lower = round(offloaded * _CACHE_READ_FACTOR)
         click.echo()

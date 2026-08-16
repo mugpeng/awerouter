@@ -129,17 +129,20 @@ awerouter show [PROFILE]              # 查看单个 profile 或全部配置（�
 awerouter serve [PROFILE] [--port 20128] [--host 127.0.0.1]
 awerouter <PROFILE>                   # serve 的简写
 awerouter config path | show | edit | init
-awerouter log [--lines 20]
-awerouter stats [--since 7d] [--profile NAME] [--clean]
-awerouter calibrate
-awerouter savings
+awerouter usage [--since 7d] [--profile NAME]     # stats 摘要（默认视图）
+awerouter usage stats [--clean]
+awerouter usage tail [--lines 20]
+awerouter usage calibrate
+awerouter usage savings
 ```
 
-`stats` 按 profile 汇总请求日志：label/destination/provider/model 分组（带百分比）、错误与降级计数、各 destination 的延迟分位数、估算 message tokens。`--since` 接受 `today`、`yesterday`、`7d` 或 `YYYY-MM-DD`（本地时间）；`--profile` 只看单个 profile；`--clean` 确认后删除已保存的日志。
+所有 `usage` 子命令读的是同一份请求日志；窗口选项放在 `usage` 和子命令之间（`awerouter usage --since today savings`）。
 
-`calibrate` 展示 L3 流量（受阈值影响的层）的消息 token 分布（仅统计 messages，不含 system prompt 与 tools 定义），并在 p90/p95/p99 处建议 `longContextThreshold` 候选值。跑一段真实流量后执行，再编辑 `routing.json`。
+`usage stats` 按 profile 汇总：label/destination/provider/model 分组（带百分比）、错误与降级计数、各 destination/provider/model 的延迟分位数（首字节与总时长）、估算 message tokens。`--since` 接受 `today`、`yesterday`、`7d` 或 `YYYY-MM-DD`（本地时间）；`--profile` 只看单个 profile；`--clean` 确认后删除已保存的日志。`usage tail` 原样显示最近条目。
 
-`savings` 是 token 记账视图：各档消化了多少输入消息 token、相对「全部直连 pro」的基线卸载了多少 pro 输入 token。cache sensitivity 小节给出卸载量的上下界（Anthropic 体系按缓存读 ~0.1×、写 ~1.25×、TTL 5 分钟折算），并展示你的换档节奏与 TTL 的关系——pro-only 基线若缓存常热，那些 token 本会按缓存读价计费。有意只展示 token；钱的估算自行乘单价（输出 token、flash 侧缓存、能力错配导致的额外轮次均未建模）。
+`usage calibrate` 展示 L3 流量（受阈值影响的层）的消息 token 分布（仅统计 messages，不含 system prompt 与 tools 定义），并在 p90/p95/p99 处建议 `longContextThreshold` 候选值。跑一段真实流量后执行，再编辑 `routing.json`。
+
+`usage savings` 是 token 记账视图：各档消化了多少输入消息 token、相对「全部直连 pro」的基线卸载了多少 pro 输入 token。cache sensitivity 小节给出卸载量的上下界（Anthropic 体系按缓存读 ~0.1×、写 ~1.25×、TTL 5 分钟折算），并展示你的换档节奏与 TTL 的关系——pro-only 基线若缓存常热，那些 token 本会按缓存读价计费。有意只展示 token；钱的估算自行乘单价（输出 token、flash 侧缓存、能力错配导致的额外轮次均未建模）。
 
 ## 故障排查
 

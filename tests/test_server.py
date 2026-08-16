@@ -115,6 +115,7 @@ class TestAwerouter:
                 entries = tail(1)
                 assert entries[0].request_id == "client-rid-123"
                 assert entries[0].profile == "test"
+                assert entries[0].duration_ms >= entries[0].ms  # full duration incl. streaming
             finally:
                 await up_server.close()
         run(t())

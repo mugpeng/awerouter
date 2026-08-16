@@ -6,15 +6,24 @@ from pathlib import Path
 
 import pytest
 
-from awerouter.logging import cadence, clear_logs, stats, tail, token_distribution, token_totals
+from awerouter.logging import (
+    cadence,
+    clear_logs,
+    log_start,
+    stats,
+    tail,
+    token_distribution,
+    token_totals,
+)
 from awerouter.types import RequestLog
 
 
 def _log(ts: str, label: str, token_count: int, destination="flash", bytes_=100,
-         profile="cc-1", status=200, ms=10, model_out="m", provider="p"):
+         profile="cc-1", status=200, ms=10, model_out="m", provider="p", duration_ms=0):
     return RequestLog(
         ts=ts, request_id="req-1", model_in="c1/pro", label=label, destination=destination,
-        provider=provider, model_out=model_out, status=status, ms=ms, bytes=bytes_,
+        provider=provider, model_out=model_out, status=status, ms=ms,
+        duration_ms=duration_ms, bytes=bytes_,
         token_count=token_count, profile=profile,
     )
 
@@ -44,6 +53,14 @@ class TestTokenTotals:
         from awerouter.logging import append
         append(_log("t1", "default", 10, destination="weird"))
         assert token_totals() == {}
+
+    def test_since_and_profile_filters(self, _log_dir):
+        from awerouter.logging import append
+        append(_log("2026-08-10T00:00:00+00:00", "default", 100, "flash"))
+        append(_log("2026-08-16T00:00:00+00:00", "default", 50, "flash", profile="cc-2"))
+        cutoff = datetime(2026, 8, 15, tzinfo=timezone.utc)
+        t = token_totals(cutoff, "cc-2")
+        assert t["flash"] == {"requests": 1, "tokens": 50}
 
 
 class TestCadence:
@@ -147,16 +164,30 @@ class TestStats:
         assert p["errors"] == 2
         assert p["fallbacks"] == 1
 
-    def test_latency_percentiles_per_destination(self, _log_dir):
+    def test_latency_percentiles_per_dimension(self, _log_dir):
         from awerouter.logging import append
         for i in range(1, 11):
-            append(_log(f"t{i}", "default", i, "flash", ms=i * 100))
-        append(_log("t11", "longContext", 1, "pro", ms=5000))
+            append(_log(f"t{i}", "default", i, "flash", ms=i * 100, provider="sf", model_out="sf-flash"))
+        append(_log("t11", "longContext", 1, "pro", ms=5000, provider="ant", model_out="opus"))
         s = stats()
         lat = s["by_profile"]["cc-1"]["latency"]
-        assert set(lat) == {"flash", "pro"}
-        assert 500 <= lat["flash"]["p50"] <= 600
-        assert lat["pro"]["p50"] == lat["pro"]["p95"] == 5000
+        assert set(lat) == {"destination", "provider", "model"}
+        assert set(lat["destination"]) == {"flash", "pro"}
+        assert 500 <= lat["destination"]["flash"]["p50"] <= 600
+        assert lat["provider"]["ant"]["p50"] == 5000
+        assert lat["model"]["sf-flash"]["p95"] == 1000
+
+    def test_total_duration_percentiles(self, _log_dir):
+        """duration_ms (streaming included) shows up as total_p50/total_p95;
+        legacy entries without it (0) are excluded from the totals."""
+        from awerouter.logging import append
+        append(_log("t1", "default", 1, "flash", ms=100, duration_ms=2000))
+        append(_log("t2", "default", 1, "flash", ms=200, duration_ms=4000))
+        append(_log("t3", "default", 1, "flash", ms=300))  # legacy: no duration
+        entry = stats()["by_profile"]["cc-1"]["latency"]["destination"]["flash"]
+        assert "total_p50" in entry
+        assert entry["total_p50"] == 2000
+        assert entry["total_p95"] == 4000
 
     def test_since_filters_by_entry_ts(self, _log_dir):
         from awerouter.logging import append
@@ -183,6 +214,45 @@ class TestStats:
         s = stats(profile="cc-2")
         assert set(s["by_profile"]) == {"cc-2"}
         assert s["total_tokens"] == 20
+
+
+class TestLogStart:
+    def test_empty(self, _log_dir):
+        assert log_start() is None
+
+    def test_returns_oldest_entry_ts(self, _log_dir):
+        from awerouter.logging import append
+        append(_log("2026-08-10T00:00:00+00:00", "default", 1))
+        append(_log("2026-08-16T00:00:00+00:00", "default", 1))
+        start = log_start()
+        assert start == datetime(2026, 8, 10, tzinfo=timezone.utc)
+
+    def test_skips_corrupt_first_line(self, _log_dir):
+        from awerouter.logging import _log_file, append, ensure_log_dir
+        ensure_log_dir()
+        with open(_log_file(), "a") as f:
+            f.write("{not json}\n")
+        append(_log("2026-08-16T00:00:00+00:00", "default", 1))
+        start = log_start()
+        assert start == datetime(2026, 8, 16, tzinfo=timezone.utc)
+
+
+class TestTokenDistributionFilters:
+    def test_profile_filter(self, _log_dir):
+        from awerouter.logging import append
+        append(_log("t1", "default", 10, profile="cc-1"))
+        append(_log("t2", "default", 20, profile="cc-2"))
+        d = token_distribution(profile="cc-2")
+        assert d["n"] == 1
+        assert d["max"] == 20
+
+    def test_since_filter(self, _log_dir):
+        from awerouter.logging import append
+        append(_log("2026-08-10T00:00:00+00:00", "default", 10))
+        append(_log("2026-08-16T00:00:00+00:00", "default", 20))
+        d = token_distribution(since=datetime(2026, 8, 15, tzinfo=timezone.utc))
+        assert d["n"] == 1
+        assert d["max"] == 20
 
 
 class TestClearLogs:

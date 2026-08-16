@@ -129,17 +129,20 @@ awerouter show [PROFILE]              # show one profile or all config (redacted
 awerouter serve [PROFILE] [--port 20128] [--host 127.0.0.1]
 awerouter <PROFILE>                   # shorthand for serve PROFILE
 awerouter config path | show | edit | init
-awerouter log [--lines 20]
-awerouter stats [--since 7d] [--profile NAME] [--clean]
-awerouter calibrate
-awerouter savings
+awerouter usage [--since 7d] [--profile NAME]     # stats summary (default view)
+awerouter usage stats [--clean]
+awerouter usage tail [--lines 20]
+awerouter usage calibrate
+awerouter usage savings
 ```
 
-`stats` aggregates the request log per profile: label/destination/provider/model breakdowns with percentages, error and fallback counts, per-destination latency percentiles, and estimated message tokens. `--since` accepts `today`, `yesterday`, `7d`, or `YYYY-MM-DD` (local time); `--profile` restricts to one profile; `--clean` deletes the saved logs after a confirmation prompt.
+All `usage` subcommands read the same request log; window options sit between `usage` and the subcommand (`awerouter usage --since today savings`).
 
-`calibrate` shows the message-token distribution of L3 traffic (the threshold-sensitive layer; messages only — system prompt and tools are excluded) and suggests candidate `longContextThreshold` values at p90/p95/p99. Run it after some real traffic, then edit `routing.json`.
+`usage stats` aggregates the log per profile: label/destination/provider/model breakdowns with percentages, error and fallback counts, latency percentiles (first byte and total) per destination/provider/model, and estimated message tokens. `--since` accepts `today`, `yesterday`, `7d`, or `YYYY-MM-DD` (local time); `--profile` restricts to one profile; `--clean` deletes the saved logs after a confirmation prompt. `usage tail` shows recent entries verbatim.
 
-`savings` is the token accounting view: how many message-input tokens each tier consumed and how many pro input tokens routing offloaded to flash vs a pro-only baseline. A cache-sensitivity section brackets the offload between "all cache reads" and "all full price" (Anthropic-style ~0.1x read / 1.25x write / 5-min TTL) and shows your switch cadence vs the TTL — a cache-warm pro-only baseline would have billed those tokens at cache-read prices. Tokens only by design; multiply by your providers' input prices yourself (output tokens, flash-side caching, and capability-mismatch turns are not modeled).
+`usage calibrate` shows the message-token distribution of L3 traffic (the threshold-sensitive layer; messages only — system prompt and tools are excluded) and suggests candidate `longContextThreshold` values at p90/p95/p99. Run it after some real traffic, then edit `routing.json`.
+
+`usage savings` is the token accounting view: how many message-input tokens each tier consumed and how many pro input tokens routing offloaded to flash vs a pro-only baseline. A cache-sensitivity section brackets the offload between "all cache reads" and "all full price" (Anthropic-style ~0.1x read / 1.25x write / 5-min TTL) and shows your switch cadence vs the TTL — a cache-warm pro-only baseline would have billed those tokens at cache-read prices. Tokens only by design; multiply by your providers' input prices yourself (output tokens, flash-side caching, and capability-mismatch turns are not modeled).
 
 ## Troubleshooting
 
