@@ -32,6 +32,44 @@ def _routing():
     }
 
 
+class TestSavings:
+    def _seed_logs(self, monkeypatch, tmp_path):
+        from awerouter.logging import append
+        from awerouter.types import RequestLog
+        log_dir = tmp_path / "logs"
+        monkeypatch.setenv("AWEROUTER_LOG_DIR", str(log_dir))
+        append(RequestLog(ts="t1", request_id="r1", model_in="auto", label="default",
+                          destination="flash", provider="p", model_out="m", status=200,
+                          ms=1, bytes=1, token_count=100, profile="cc-1"))
+        append(RequestLog(ts="t2", request_id="r2", model_in="pro", label="think",
+                          destination="pro", provider="p", model_out="m", status=200,
+                          ms=1, bytes=1, token_count=30, profile="cc-1"))
+        append(RequestLog(ts="t3", request_id="r3", model_in="auto", label="default→fallback",
+                          destination="pro", provider="p", model_out="m", status=200,
+                          ms=1, bytes=1, token_count=20, profile="cc-1"))
+
+    def test_no_logs(self, tmp_path, monkeypatch):
+        _setup(tmp_path, monkeypatch)
+        monkeypatch.setenv("AWEROUTER_LOG_DIR", str(tmp_path / "empty"))
+        r = CliRunner().invoke(cli, ["savings"])
+        assert r.exit_code == 0
+        assert "(no logs yet)" in r.output
+
+    def test_token_accounting(self, tmp_path, monkeypatch):
+        _setup(tmp_path, monkeypatch, _providers(), _routing())
+        self._seed_logs(monkeypatch, tmp_path)
+        r = CliRunner().invoke(cli, ["savings"])
+        assert r.exit_code == 0, r.output
+        assert "requests: 3  (flash 1 / pro 2, 33% flash, fallback 1)" in r.output
+        lines = r.output.splitlines()
+        assert any(l.strip().startswith("flash") and "100" in l for l in lines)
+        assert any(l.strip().startswith("pro") and "50" in l for l in lines)
+        assert any(l.strip().startswith("total") and "150" in l for l in lines)
+        assert "offloaded to flash 100  (67% of input tokens)" in r.output
+        assert "150 → 50" in r.output
+        assert "money saved" in r.output
+
+
 class TestInit:
     def test_top_level_init_creates_both_files(self, tmp_path, monkeypatch):
         _setup(tmp_path, monkeypatch)

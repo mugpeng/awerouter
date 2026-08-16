@@ -165,16 +165,75 @@ def log(lines: int):
         )
 
 
+def _parse_since(value: str):
+    """Resolve a --since value to an aware local datetime (window lower bound).
+
+    Accepts 'today', 'yesterday', 'Nd' (e.g. 7d), or a date (YYYY-MM-DD).
+    """
+    import re
+    from datetime import datetime, timedelta
+    v = value.strip().lower()
+    now = datetime.now().astimezone()
+    if v == "today":
+        return now.replace(hour=0, minute=0, second=0, microsecond=0)
+    if v == "yesterday":
+        return now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
+    m = re.fullmatch(r"(\d+)d", v)
+    if m:
+        return now - timedelta(days=int(m.group(1)))
+    try:
+        d = datetime.fromisoformat(value)
+    except ValueError:
+        raise click.BadParameter(
+            "expected 'today', 'yesterday', Nd (e.g. 7d), or YYYY-MM-DD"
+        ) from None
+    return d.astimezone()
+
+
+def _fmt_ms(ms) -> str:
+    if ms is None:
+        return "-"
+    return f"{ms / 1000:.1f}s" if ms >= 1000 else f"{ms}ms"
+
+
+def _echo_counts(counts: dict, total: int) -> None:
+    for k, v in sorted(counts.items()):
+        pct = round(100 * v / total) if total else 0
+        click.echo(f"    {k:24s} {v} ({pct}%)")
+
+
 @cli.command()
-def stats():
+@click.option("--since", default=None,
+              help="Count entries from this point on: 'today', 'yesterday', Nd (e.g. 7d), or YYYY-MM-DD.")
+@click.option("--profile", "profile_name", default=None, help="Count entries for one routing profile only.")
+@click.option("--clean", is_flag=True, default=False,
+              help="Delete saved request logs (asks for confirmation).")
+def stats(since, profile_name, clean):
     """Show aggregated routing stats, grouped by profile."""
-    from awerouter.logging import stats as _stats
-    s = _stats()
+    from awerouter.logging import clear_logs, stats as _stats
+    if clean:
+        if click.confirm("Delete all saved request logs (requests.jsonl + rotated backup)?"):
+            removed = clear_logs()
+            for p in removed:
+                click.echo(f"removed {p}")
+            if not removed:
+                click.echo("(no logs to remove)")
+            return
+        click.echo("aborted — showing stats instead")
+    cutoff = _parse_since(since) if since else None
+    s = _stats(cutoff, profile_name)
     if not s:
         click.echo("(no logs yet)")
         return
+    if since:
+        click.echo(f"window         : since {cutoff:%Y-%m-%d %H:%M} local")
+    if profile_name:
+        click.echo(f"profile        : {profile_name}")
     click.echo(f"total_requests : {s['total_requests']}")
-    click.echo(f"total_bytes    : {s['total_bytes']}")
+    click.echo(f"~total_tokens  : {s['total_tokens']}  (messages only — system prompt & tools excluded)")
+    err_pct = round(100 * s["errors"] / s["total_requests"]) if s["total_requests"] else 0
+    click.echo(f"errors         : {s['errors']} ({err_pct}%)")
+    click.echo(f"fallbacks      : {s['fallbacks']}  (flash failed -> pro)")
     if s["flash_requests"]:
         click.echo(
             f"pro input offloaded to flash: ~{s['flash_tokens']} tokens "
@@ -183,16 +242,20 @@ def stats():
         click.echo("  (message tokens only — system prompt & tools excluded; conservative)")
     for name, p in sorted(s["by_profile"].items()):
         click.echo()
-        click.echo(f"profile {name}  ({p['requests']} requests, ~{p['flash_tokens']} flash tokens):")
+        extras = f", {p['errors']} errors, {p['fallbacks']} fallbacks"
+        click.echo(f"profile {name}  ({p['requests']} requests, ~{p['flash_tokens']} flash tokens{extras}):")
         click.echo("  by_label:")
-        for k, v in sorted(p["by_label"].items()):
-            click.echo(f"    {k:16s} {v}")
+        _echo_counts(p["by_label"], p["requests"])
         click.echo("  by_destination:")
         for k, v in sorted(p["by_destination"].items()):
-            click.echo(f"    {k:10s} {v}")
+            pct = round(100 * v / p["requests"]) if p["requests"] else 0
+            lat = p["latency"].get(k)
+            lat_s = f"  p50 {_fmt_ms(lat['p50'])}  p95 {_fmt_ms(lat['p95'])}" if lat else ""
+            click.echo(f"    {k:24s} {v} ({pct}%){lat_s}")
         click.echo("  by_provider:")
-        for k, v in sorted(p["by_provider"].items()):
-            click.echo(f"    {k:16s} {v}")
+        _echo_counts(p["by_provider"], p["requests"])
+        click.echo("  by_model:")
+        _echo_counts(p["by_model"], p["requests"])
 
 
 @cli.command()
@@ -215,6 +278,42 @@ def calibrate():
     click.echo("if you set longContextThreshold to:")
     for c in d["candidates"]:
         click.echo(f"  {c['threshold']:>7}   → {c['flash_pct']}% flash, {100 - c['flash_pct']}% pro")
+
+
+@cli.command()
+def savings():
+    """Estimate token savings vs a pro-only setup (token view, no prices).
+
+    Shows how many message-input tokens each tier consumed and how many pro
+    input tokens routing offloaded to flash. Multiply by your providers' input
+    prices yourself for a money estimate.
+    """
+    from awerouter.logging import token_totals
+    t = token_totals()
+    if not t:
+        click.echo("(no logs yet)")
+        return
+    flash, pro = t["flash"], t["pro"]
+    total_req = flash["requests"] + pro["requests"]
+    total_tok = flash["tokens"] + pro["tokens"]
+    offloaded = flash["tokens"]
+    pct_tok = round(100 * offloaded / total_tok) if total_tok else 0
+    pct_req = round(100 * flash["requests"] / total_req) if total_req else 0
+
+    click.echo(f"requests: {total_req}  (flash {flash['requests']} / pro {pro['requests']}, "
+               f"{pct_req}% flash, fallback {t['fallback']})")
+    click.echo()
+    click.echo("message input tokens (input side only — output tokens are not visible to the proxy):")
+    click.echo(f"  flash   {flash['tokens']:>9,}   avg {flash['tokens'] // max(flash['requests'], 1):,}/req")
+    click.echo(f"  pro     {pro['tokens']:>9,}   avg {pro['tokens'] // max(pro['requests'], 1):,}/req")
+    click.echo(f"  total   {total_tok:>9,}")
+    click.echo()
+    click.echo("vs a pro-only setup:")
+    click.echo(f"  pro input billed   {total_tok:,} → {pro['tokens']:,}")
+    click.echo(f"  offloaded to flash {offloaded:,}  ({pct_tok}% of input tokens)")
+    click.echo()
+    click.echo("money saved ≈ offloaded × (pro − flash input price per token)")
+    click.echo("cache effects and extra turns from capability mismatch are not modeled")
 
 
 def main(argv=None):

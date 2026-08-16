@@ -132,9 +132,12 @@ awerouter config path | show | edit | init
 awerouter log [--lines 20]
 awerouter stats
 awerouter calibrate
+awerouter savings
 ```
 
 `calibrate` 展示 L3 流量（受阈值影响的层）的消息 token 分布（仅统计 messages，不含 system prompt 与 tools 定义），并在 p90/p95/p99 处建议 `longContextThreshold` 候选值。跑一段真实流量后执行，再编辑 `routing.json`。
+
+`savings` 是 token 记账视图：各档消化了多少输入消息 token、相对「全部直连 pro」的基线卸载了多少 pro 输入 token。有意只展示 token —— 钱的估算请自行乘上你所用 provider 的输入单价（输出 token、缓存效应、能力错配导致的额外轮次均未建模）。
 
 ## 故障排查
 

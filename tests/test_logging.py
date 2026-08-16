@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from awerouter.logging import stats, tail, token_distribution
+from awerouter.logging import stats, tail, token_distribution, token_totals
 from awerouter.types import RequestLog
 
 
@@ -22,6 +22,26 @@ def _log_dir(tmp_path, monkeypatch):
     log_dir = tmp_path / "logs"
     monkeypatch.setenv("AWEROUTER_LOG_DIR", str(log_dir))
     return log_dir
+
+
+class TestTokenTotals:
+    def test_empty(self, _log_dir):
+        assert token_totals() == {}
+
+    def test_counts_tokens_and_fallback(self, _log_dir):
+        from awerouter.logging import append
+        append(_log("t1", "default", 100, "flash"))
+        append(_log("t2", "think", 50, "pro"))
+        append(_log("t3", "default→fallback", 30, "pro"))
+        t = token_totals()
+        assert t["flash"] == {"requests": 1, "tokens": 100}
+        assert t["pro"] == {"requests": 2, "tokens": 80}
+        assert t["fallback"] == 1
+
+    def test_ignores_unknown_destinations(self, _log_dir):
+        from awerouter.logging import append
+        append(_log("t1", "default", 10, destination="weird"))
+        assert token_totals() == {}
 
 
 class TestStats:

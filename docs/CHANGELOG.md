@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- `savings` command: token accounting vs a pro-only baseline — message-input tokens per tier (with per-request averages), pro input tokens offloaded to flash, fallback count, and the offload share. Tokens only by design; no prices in config (multiply by your providers' input prices yourself).
+
 ## v0.2.5 - 2026-08-16
 
 Protocol-based provider grouping with same-protocol passthrough for all three major wire protocols.

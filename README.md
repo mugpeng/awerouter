@@ -132,9 +132,12 @@ awerouter config path | show | edit | init
 awerouter log [--lines 20]
 awerouter stats
 awerouter calibrate
+awerouter savings
 ```
 
 `calibrate` shows the message-token distribution of L3 traffic (the threshold-sensitive layer; messages only — system prompt and tools are excluded) and suggests candidate `longContextThreshold` values at p90/p95/p99. Run it after some real traffic, then edit `routing.json`.
+
+`savings` is the token accounting view: how many message-input tokens each tier consumed and how many pro input tokens routing offloaded to flash vs a pro-only baseline. It deliberately shows tokens only — multiply by your providers' input prices yourself for a money estimate (output tokens, cache effects, and capability-mismatch turns are not modeled).
 
 ## Troubleshooting
 

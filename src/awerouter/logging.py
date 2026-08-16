@@ -2,6 +2,7 @@
 
 import json
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 
 from awerouter.types import RequestLog
@@ -107,27 +108,20 @@ def tail(n: int = 20) -> list[RequestLog]:
     return result
 
 
-def _new_profile_bucket() -> dict:
-    return {
-        "requests": 0,
-        "bytes": 0,
-        # Estimated pro input saved: message tokens of requests served by flash
-        # that a pro-only setup would have billed at pro's input price.
-        "flash_tokens": 0,
-        "flash_requests": 0,
-        "by_label": {},
-        "by_destination": {},
-        "by_provider": {},
-    }
+def token_totals() -> dict:
+    """Count requests and message tokens by destination, plus fallback count.
 
-
-def stats() -> dict:
+    Input-side accounting for `savings`: message tokens of flash-served requests
+    are exactly the pro input tokens a pro-only setup would additionally bill.
+    """
     f = _log_file()
     if not f.exists():
         return {}
-    by_profile: dict = {}
-    total_bytes = 0
-    total_requests = 0
+    out = {
+        "flash": {"requests": 0, "tokens": 0},
+        "pro": {"requests": 0, "tokens": 0},
+        "fallback": 0,
+    }
     for line in f.read_text(encoding="utf-8").splitlines():
         if not line:
             continue
@@ -135,30 +129,140 @@ def stats() -> dict:
             data = json.loads(line)
         except json.JSONDecodeError:
             continue
+        dest = data.get("destination", "")
+        if dest in out:
+            out[dest]["requests"] += 1
+            out[dest]["tokens"] += data.get("token_count", 0)
+        if "fallback" in data.get("label", ""):
+            out["fallback"] += 1
+    if not (out["flash"]["requests"] or out["pro"]["requests"]):
+        return {}
+    return out
+
+
+def _new_profile_bucket() -> dict:
+    return {
+        "requests": 0,
+        "tokens": 0,
+        "errors": 0,
+        "fallbacks": 0,
+        # Estimated pro input saved: message tokens of requests served by flash
+        # that a pro-only setup would have billed at pro's input price.
+        "flash_tokens": 0,
+        "flash_requests": 0,
+        "by_label": {},
+        "by_destination": {},
+        "by_provider": {},
+        "by_model": {},
+        "ms": {"flash": [], "pro": []},
+    }
+
+
+def _entry_ts(data: dict):
+    """Parsed entry timestamp (UTC-aware), or None if missing/unparseable."""
+    ts = data.get("ts", "")
+    try:
+        dt = datetime.fromisoformat(ts)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+def _percentile(values: list, p: int):
+    if not values:
+        return None
+    s = sorted(values)
+    idx = max(0, min(len(s) - 1, round(p / 100 * (len(s) - 1))))
+    return s[idx]
+
+
+def stats(since=None, profile=None) -> dict:
+    """Aggregate request stats.
+
+    since: aware datetime lower bound (None = all history; entries with an
+    unparseable ts are excluded when a filter is active).
+    profile: restrict to one routing profile id (None = all).
+    """
+    f = _log_file()
+    if not f.exists():
+        return {}
+    by_profile: dict = {}
+    total_tokens = 0
+    total_requests = 0
+    errors = 0
+    fallbacks = 0
+    for line in f.read_text(encoding="utf-8").splitlines():
+        if not line:
+            continue
+        try:
+            data = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if since is not None:
+            ts = _entry_ts(data)
+            if ts is None or ts < since:
+                continue
+        if profile is not None and (data.get("profile", "") or "(unknown)") != profile:
+            continue
         label = data.get("label", "unknown")
         dest = data.get("destination", "unknown")
         prov = data.get("provider", "unknown")
+        model = data.get("model_out", "unknown")
         tokens = data.get("token_count", 0)
+        status = data.get("status")
         bucket = by_profile.setdefault(
             data.get("profile", "") or "(unknown)", _new_profile_bucket()
         )
         bucket["requests"] += 1
-        bucket["bytes"] += data.get("bytes", 0)
+        bucket["tokens"] += tokens
         bucket["by_label"][label] = bucket["by_label"].get(label, 0) + 1
         bucket["by_destination"][dest] = bucket["by_destination"].get(dest, 0) + 1
         bucket["by_provider"][prov] = bucket["by_provider"].get(prov, 0) + 1
+        bucket["by_model"][model] = bucket["by_model"].get(model, 0) + 1
+        if isinstance(status, int) and status >= 400:
+            bucket["errors"] += 1
+            errors += 1
+        if "fallback" in label:
+            bucket["fallbacks"] += 1
+            fallbacks += 1
         if dest == "flash":
             bucket["flash_tokens"] += tokens
             bucket["flash_requests"] += 1
-        total_bytes += data.get("bytes", 0)
+        if dest in bucket["ms"]:
+            bucket["ms"][dest].append(data.get("ms", 0))
+        total_tokens += tokens
         total_requests += 1
+    for bucket in by_profile.values():
+        latency = {}
+        for dest, values in bucket.pop("ms").items():
+            if values:
+                latency[dest] = {"p50": _percentile(values, 50), "p95": _percentile(values, 95)}
+        bucket["latency"] = latency
     return {
         "total_requests": total_requests,
-        "total_bytes": total_bytes,
+        "total_tokens": total_tokens,
+        "errors": errors,
+        "fallbacks": fallbacks,
         "flash_tokens": sum(p["flash_tokens"] for p in by_profile.values()),
         "flash_requests": sum(p["flash_requests"] for p in by_profile.values()),
         "by_profile": by_profile,
     }
+
+
+def clear_logs() -> list:
+    """Delete the request log and its rotated backup. Returns removed paths."""
+    current = _log_file()
+    paths = (current, current.with_name(current.name + _ROTATED_SUFFIX))
+    removed = []
+    for p in paths:
+        try:
+            p.unlink()
+            removed.append(p)
+        except FileNotFoundError:
+            pass
+    return removed
 
 
 # L3 labels: threshold-sensitive (decided by token_count vs longContextThreshold).
