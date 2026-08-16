@@ -167,6 +167,63 @@ class TestAdd:
         assert "already exists" in r.output
 
 
+class TestStats:
+    def _seed_log(self, tmp_path, monkeypatch):
+        from awerouter.logging import append
+        from awerouter.types import RequestLog
+        log_dir = tmp_path / "logs"
+        monkeypatch.setenv("AWEROUTER_LOG_DIR", str(log_dir))
+        append(RequestLog(
+            ts="2026-08-16T00:00:00+00:00", request_id="r1", model_in="auto",
+            label="default", destination="flash", provider="stepfun",
+            model_out="sf-flash", status=200, ms=800, bytes=100,
+            token_count=120, profile="cc-1",
+        ))
+
+    def test_shows_tokens_and_by_model(self, tmp_path, monkeypatch):
+        _setup(tmp_path, monkeypatch, _providers(), _routing())
+        self._seed_log(tmp_path, monkeypatch)
+        r = CliRunner().invoke(cli, ["stats"])
+        assert r.exit_code == 0, r.output
+        assert "total_requests : 1" in r.output
+        assert "~total_tokens  : 120" in r.output
+        assert "total_bytes" not in r.output
+        assert "by_model" in r.output
+        assert "sf-flash" in r.output
+        assert "errors         : 0" in r.output
+
+    def test_clean_confirmed_removes_log(self, tmp_path, monkeypatch):
+        _setup(tmp_path, monkeypatch, _providers(), _routing())
+        self._seed_log(tmp_path, monkeypatch)
+        r = CliRunner().invoke(cli, ["stats", "--clean"], input="y\n")
+        assert r.exit_code == 0, r.output
+        assert "removed" in r.output
+        assert not (tmp_path / "logs" / "requests.jsonl").exists()
+
+    def test_clean_declined_keeps_log(self, tmp_path, monkeypatch):
+        _setup(tmp_path, monkeypatch, _providers(), _routing())
+        self._seed_log(tmp_path, monkeypatch)
+        r = CliRunner().invoke(cli, ["stats", "--clean"], input="n\n")
+        assert r.exit_code == 0, r.output
+        assert "aborted" in r.output
+        assert (tmp_path / "logs" / "requests.jsonl").exists()
+
+    def test_since_window(self, tmp_path, monkeypatch):
+        _setup(tmp_path, monkeypatch, _providers(), _routing())
+        self._seed_log(tmp_path, monkeypatch)
+        r = CliRunner().invoke(cli, ["stats", "--since", "today"])
+        assert r.exit_code == 0, r.output
+        # entry ts is 2026-08-16 UTC midnight; depending on local tz it may fall
+        # inside or before today's window — either way the command succeeds and
+        # reports the window line
+        assert "window" in r.output
+
+    def test_bad_since_errors(self, tmp_path, monkeypatch):
+        _setup(tmp_path, monkeypatch, _providers(), _routing())
+        r = CliRunner().invoke(cli, ["stats", "--since", "blah"])
+        assert r.exit_code != 0
+
+
 class TestBareProfileLaunch:
     def test_unknown_subcommand_resolves_to_profile(self, tmp_path, monkeypatch):
         _setup(tmp_path, monkeypatch, _providers(), _routing())

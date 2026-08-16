@@ -130,10 +130,12 @@ awerouter serve [PROFILE] [--port 20128] [--host 127.0.0.1]
 awerouter <PROFILE>                   # serve 的简写
 awerouter config path | show | edit | init
 awerouter log [--lines 20]
-awerouter stats
+awerouter stats [--since 7d] [--profile NAME] [--clean]
 awerouter calibrate
 awerouter savings
 ```
+
+`stats` 按 profile 汇总请求日志：label/destination/provider/model 分组（带百分比）、错误与降级计数、各 destination 的延迟分位数、估算 message tokens。`--since` 接受 `today`、`yesterday`、`7d` 或 `YYYY-MM-DD`（本地时间）；`--profile` 只看单个 profile；`--clean` 确认后删除已保存的日志。
 
 `calibrate` 展示 L3 流量（受阈值影响的层）的消息 token 分布（仅统计 messages，不含 system prompt 与 tools 定义），并在 p90/p95/p99 处建议 `longContextThreshold` 候选值。跑一段真实流量后执行，再编辑 `routing.json`。
 

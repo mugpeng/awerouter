@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Added
+- `stats` rework: `~total_tokens` (estimated input message tokens) replaces the meaningless `total_bytes`; new `by_model` breakdown, error and fallback counts, per-destination latency p50/p95, and percentages on all breakdowns. `--since today|yesterday|Nd|YYYY-MM-DD` and `--profile NAME` window filters (entries with unparseable timestamps are excluded while filtering); `stats --clean` deletes the saved request log and its rotated backup after a confirmation prompt.
 - `savings` command: token accounting vs a pro-only baseline — message-input tokens per tier (with per-request averages), pro input tokens offloaded to flash, fallback count, and the offload share. Tokens only by design; no prices in config (multiply by your providers' input prices yourself).
 
 ## v0.2.5 - 2026-08-16

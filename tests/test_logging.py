@@ -1,18 +1,20 @@
 """Tests for awerouter.logging."""
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
 
-from awerouter.logging import stats, tail, token_distribution, token_totals
+from awerouter.logging import clear_logs, stats, tail, token_distribution, token_totals
 from awerouter.types import RequestLog
 
 
-def _log(ts: str, label: str, token_count: int, destination="flash", bytes_=100, profile="cc-1"):
+def _log(ts: str, label: str, token_count: int, destination="flash", bytes_=100,
+         profile="cc-1", status=200, ms=10, model_out="m", provider="p"):
     return RequestLog(
         ts=ts, request_id="req-1", model_in="c1/pro", label=label, destination=destination,
-        provider="p", model_out="m", status=200, ms=10, bytes=bytes_,
+        provider=provider, model_out=model_out, status=status, ms=ms, bytes=bytes_,
         token_count=token_count, profile=profile,
     )
 
@@ -89,6 +91,89 @@ class TestStats:
         assert s["flash_tokens"] == 150
         assert s["flash_requests"] == 2
         assert s["by_profile"]["cc-1"]["flash_tokens"] == 150
+
+    def test_tokens_not_bytes(self, _log_dir):
+        from awerouter.logging import append
+        append(_log("t1", "default", 100, "flash"))
+        append(_log("t2", "longContext", 50, "pro"))
+        s = stats()
+        assert s["total_tokens"] == 150
+        assert "total_bytes" not in s
+        assert s["by_profile"]["cc-1"]["tokens"] == 150
+
+    def test_by_model(self, _log_dir):
+        from awerouter.logging import append
+        append(_log("t1", "default", 10, "flash", model_out="sf-flash"))
+        append(_log("t2", "longContext", 20, "pro", model_out="opus-5"))
+        append(_log("t3", "default", 30, "flash", model_out="sf-flash"))
+        s = stats()
+        assert s["by_profile"]["cc-1"]["by_model"] == {"sf-flash": 2, "opus-5": 1}
+
+    def test_errors_and_fallbacks(self, _log_dir):
+        from awerouter.logging import append
+        append(_log("t1", "default", 10, "flash"))
+        append(_log("t2", "default", 10, "pro", status=503))
+        append(_log("t3", "default→fallback", 10, "pro", status=200))
+        append(_log("t4", "think", 10, "pro", status=401))
+        s = stats()
+        assert s["errors"] == 2
+        assert s["fallbacks"] == 1
+        p = s["by_profile"]["cc-1"]
+        assert p["errors"] == 2
+        assert p["fallbacks"] == 1
+
+    def test_latency_percentiles_per_destination(self, _log_dir):
+        from awerouter.logging import append
+        for i in range(1, 11):
+            append(_log(f"t{i}", "default", i, "flash", ms=i * 100))
+        append(_log("t11", "longContext", 1, "pro", ms=5000))
+        s = stats()
+        lat = s["by_profile"]["cc-1"]["latency"]
+        assert set(lat) == {"flash", "pro"}
+        assert 500 <= lat["flash"]["p50"] <= 600
+        assert lat["pro"]["p50"] == lat["pro"]["p95"] == 5000
+
+    def test_since_filters_by_entry_ts(self, _log_dir):
+        from awerouter.logging import append
+        old = "2026-08-10T00:00:00+00:00"
+        new = "2026-08-16T00:00:00+00:00"
+        append(_log(old, "default", 100, "flash"))
+        append(_log(new, "default", 50, "flash"))
+        cutoff = datetime(2026, 8, 15, tzinfo=timezone.utc)
+        s = stats(since=cutoff)
+        assert s["total_requests"] == 1
+        assert s["total_tokens"] == 50
+
+    def test_since_excludes_unparseable_ts(self, _log_dir):
+        """Fake/legacy ts values can't be placed in a window — excluded when filtering."""
+        from awerouter.logging import append
+        append(_log("t1", "default", 100, "flash"))
+        s = stats(since=datetime(2020, 1, 1, tzinfo=timezone.utc))
+        assert s["total_requests"] == 0
+
+    def test_profile_filter(self, _log_dir):
+        from awerouter.logging import append
+        append(_log("t1", "default", 10, "flash", profile="cc-1"))
+        append(_log("t2", "default", 20, "flash", profile="cc-2"))
+        s = stats(profile="cc-2")
+        assert set(s["by_profile"]) == {"cc-2"}
+        assert s["total_tokens"] == 20
+
+
+class TestClearLogs:
+    def test_removes_log_and_backup(self, _log_dir):
+        from awerouter.logging import append, ensure_log_dir
+        append(_log("t1", "default", 1))
+        ensure_log_dir()
+        backup = _log_dir / "requests.jsonl.1"
+        backup.write_text("old\n")
+        removed = clear_logs()
+        assert set(removed) == {_log_dir / "requests.jsonl", backup}
+        assert not (_log_dir / "requests.jsonl").exists()
+        assert not backup.exists()
+
+    def test_missing_files_are_noop(self, _log_dir):
+        assert clear_logs() == []
 
 
 class TestTail:

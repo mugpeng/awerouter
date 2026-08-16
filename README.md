@@ -130,10 +130,12 @@ awerouter serve [PROFILE] [--port 20128] [--host 127.0.0.1]
 awerouter <PROFILE>                   # shorthand for serve PROFILE
 awerouter config path | show | edit | init
 awerouter log [--lines 20]
-awerouter stats
+awerouter stats [--since 7d] [--profile NAME] [--clean]
 awerouter calibrate
 awerouter savings
 ```
+
+`stats` aggregates the request log per profile: label/destination/provider/model breakdowns with percentages, error and fallback counts, per-destination latency percentiles, and estimated message tokens. `--since` accepts `today`, `yesterday`, `7d`, or `YYYY-MM-DD` (local time); `--profile` restricts to one profile; `--clean` deletes the saved logs after a confirmation prompt.
 
 `calibrate` shows the message-token distribution of L3 traffic (the threshold-sensitive layer; messages only — system prompt and tools are excluded) and suggests candidate `longContextThreshold` values at p90/p95/p99. Run it after some real traffic, then edit `routing.json`.
 

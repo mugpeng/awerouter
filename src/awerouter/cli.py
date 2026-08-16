@@ -242,7 +242,8 @@ def stats(since, profile_name, clean):
         click.echo("  (message tokens only — system prompt & tools excluded; conservative)")
     for name, p in sorted(s["by_profile"].items()):
         click.echo()
-        extras = f", {p['errors']} errors, {p['fallbacks']} fallbacks"
+        extras = (f", {p['errors']} error{'s' if p['errors'] != 1 else ''}"
+                  f", {p['fallbacks']} fallback{'s' if p['fallbacks'] != 1 else ''}")
         click.echo(f"profile {name}  ({p['requests']} requests, ~{p['flash_tokens']} flash tokens{extras}):")
         click.echo("  by_label:")
         _echo_counts(p["by_label"], p["requests"])
