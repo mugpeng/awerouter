@@ -12,6 +12,7 @@
 ### Added
 - `awerouter restore [providers|routing]`: restore a config file from its `.bak` backup. Backups are single-slot (aweswitch convention) and written by `config edit` and the `add` wizard before every write.
 - `usage clean`: deletes saved request logs after a confirmation prompt — moved off `usage stats --clean` so `stats` stays read-only.
+- Request log records `protocol` and `agent` per request. Protocol is the wire protocol served; agent is the calling client normalized from its `User-Agent` header (`claude-cli/...` → `claude-code`, `codex_cli_rs/...` → `codex`, `opencode/...` → `opencode`; unknown clients keep their first UA token) — awerouter only sees the wire request, so the UA is the only place caller identity exists. `usage log` shows both columns; `usage stats` labels each profile with its protocol and adds a `by_agent` breakdown. Legacy entries without the fields keep parsing (shown as `-` / `(unknown)`).
 
 ## v0.3.1 - 2026-08-16
 

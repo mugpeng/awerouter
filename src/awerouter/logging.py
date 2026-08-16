@@ -60,6 +60,8 @@ def append(log: RequestLog) -> None:
             "duration_ms": log.duration_ms,
             "bytes": log.bytes,
             "token_count": log.token_count,
+            "protocol": log.protocol,
+            "agent": log.agent,
         }, ensure_ascii=False) + "\n")
 
 
@@ -119,6 +121,8 @@ def tail(n: int | None = 20) -> list[RequestLog]:
                 duration_ms=data.get("duration_ms", 0),
                 bytes=data.get("bytes", 0),
                 token_count=data.get("token_count", 0),
+                protocol=data.get("protocol", ""),
+                agent=data.get("agent", ""),
             ))
         except json.JSONDecodeError:
             continue
@@ -209,6 +213,7 @@ def cadence(since=None, profile=None) -> dict:
 
 def _new_profile_bucket() -> dict:
     return {
+        "protocol": "",   # wire protocol shared by the profile's entries ("" = legacy log)
         "requests": 0,
         "tokens": 0,
         "errors": 0,
@@ -221,6 +226,7 @@ def _new_profile_bucket() -> dict:
         "by_destination": {},
         "by_provider": {},
         "by_model": {},
+        "by_agent": {},
         # (first-byte ms, total ms) samples per breakdown dimension
         "_ms": {"destination": {}, "provider": {}, "model": {}},
     }
@@ -307,17 +313,21 @@ def stats(since=None, profile=None) -> dict:
         dest = data.get("destination", "unknown")
         prov = data.get("provider", "unknown")
         model = data.get("model_out", "unknown")
+        agent = data.get("agent", "") or "(unknown)"
         tokens = data.get("token_count", 0)
         status = data.get("status")
         bucket = by_profile.setdefault(
             data.get("profile", "") or "(unknown)", _new_profile_bucket()
         )
+        if not bucket["protocol"]:
+            bucket["protocol"] = data.get("protocol", "")
         bucket["requests"] += 1
         bucket["tokens"] += tokens
         bucket["by_label"][label] = bucket["by_label"].get(label, 0) + 1
         bucket["by_destination"][dest] = bucket["by_destination"].get(dest, 0) + 1
         bucket["by_provider"][prov] = bucket["by_provider"].get(prov, 0) + 1
         bucket["by_model"][model] = bucket["by_model"].get(model, 0) + 1
+        bucket["by_agent"][agent] = bucket["by_agent"].get(agent, 0) + 1
         if isinstance(status, int) and status >= 400:
             bucket["errors"] += 1
             errors += 1

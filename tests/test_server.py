@@ -8,7 +8,7 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from awerouter.server import _loopback_proxy_warning, create_app
+from awerouter.server import _agent_from_ua, _loopback_proxy_warning, create_app
 from awerouter.types import Destination, Provider, RoutingProfile, Settings
 
 
@@ -116,6 +116,44 @@ class TestAwerouter:
                 assert entries[0].request_id == "client-rid-123"
                 assert entries[0].profile == "test"
                 assert entries[0].duration_ms >= entries[0].ms  # full duration incl. streaming
+            finally:
+                await up_server.close()
+        run(t())
+
+    def test_protocol_and_agent_logged(self):
+        async def t():
+            async def up(request):
+                body = await request.json()
+                return web.json_response({"model": body["model"]})
+
+            up_app = web.Application()
+            up_app.router.add_post("/v1/messages", up)
+            up_app.router.add_post("/chat/completions", up)
+            up_server = TestServer(up_app)
+            await up_server.start_server()
+            try:
+                app = create_app(_providers(up_server.port), ROUTING, SETTINGS)
+                async with TestClient(TestServer(app)) as c:
+                    await c.post("/v1/messages", json={
+                        "model": "flash", "messages": [{"content": "hi"}],
+                    }, headers={"User-Agent": "claude-cli/2.0.1 (external, cli)"})
+
+                    profile = RoutingProfile("cx", "openai-chat", 32, {
+                        "flash": Destination("stepfun", "sf-flash"),
+                        "pro": Destination("anthropic", "gpt-pro"),
+                    })
+                    app2 = create_app(_providers(up_server.port), profile, SETTINGS)
+                    async with TestClient(TestServer(app2)) as c2:
+                        await c2.post("/v1/chat/completions", json={
+                            "model": "auto", "messages": [{"role": "user", "content": "hi"}],
+                        }, headers={"User-Agent": "codex_cli_rs/0.42.0 (Mac OS 24.6.0; arm64)"})
+                from awerouter.logging import tail
+                entries = tail(2)
+                by_profile = {e.profile: e for e in entries}
+                assert by_profile["test"].protocol == "anthropic"
+                assert by_profile["test"].agent == "claude-code"
+                assert by_profile["cx"].protocol == "openai-chat"
+                assert by_profile["cx"].agent == "codex"
             finally:
                 await up_server.close()
         run(t())
@@ -481,6 +519,22 @@ class TestOpenAIProtocols:
                 })
                 assert r.status == 400
         run(t())
+
+
+class TestAgentFromUA:
+    def test_known_clients(self):
+        assert _agent_from_ua("claude-cli/2.0.1 (external, cli)") == "claude-code"
+        assert _agent_from_ua("Claude-Code/1.0.33") == "claude-code"
+        assert _agent_from_ua("codex_cli_rs/0.42.0 (Mac OS 24.6.0)") == "codex"
+        assert _agent_from_ua("opencode/0.16.3") == "opencode"
+        assert _agent_from_ua("OpenCode/1.2.3 (go)") == "opencode"
+
+    def test_unknown_falls_back_to_first_token(self):
+        assert _agent_from_ua("python-requests/2.31.0") == "python-requests"
+        assert _agent_from_ua("curl/8.7.1") == "curl"
+
+    def test_empty(self):
+        assert _agent_from_ua("") == ""
 
 
 class TestLoopbackProxyWarning:

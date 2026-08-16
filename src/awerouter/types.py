@@ -69,3 +69,5 @@ class RequestLog:
     token_count: int
     profile: str = ""
     duration_ms: int = 0                      # full request duration incl. streaming (0 = not recorded)
+    protocol: str = ""                        # wire protocol served (anthropic / openai-chat / openai-responses)
+    agent: str = ""                           # normalized client identity from the User-Agent header

@@ -19,12 +19,14 @@ from awerouter.types import RequestLog
 
 
 def _log(ts: str, label: str, token_count: int, destination="flash", bytes_=100,
-         profile="cc-1", status=200, ms=10, model_out="m", provider="p", duration_ms=0):
+         profile="cc-1", status=200, ms=10, model_out="m", provider="p", duration_ms=0,
+         protocol="anthropic", agent=""):
     return RequestLog(
         ts=ts, request_id="req-1", model_in="c1/pro", label=label, destination=destination,
         provider=provider, model_out=model_out, status=status, ms=ms,
         duration_ms=duration_ms, bytes=bytes_,
         token_count=token_count, profile=profile,
+        protocol=protocol, agent=agent,
     )
 
 
@@ -150,6 +152,27 @@ class TestStats:
         append(_log("t3", "default", 30, "flash", model_out="sf-flash"))
         s = stats()
         assert s["by_profile"]["cc-1"]["by_model"] == {"sf-flash": 2, "opus-5": 1}
+
+    def test_by_agent_and_protocol(self, _log_dir):
+        from awerouter.logging import append
+        append(_log("t1", "default", 10, "flash", agent="claude-code"))
+        append(_log("t2", "longContext", 20, "pro", agent="claude-code"))
+        append(_log("t3", "default", 30, "flash", agent="codex"))
+        s = stats()
+        p = s["by_profile"]["cc-1"]
+        assert p["by_agent"] == {"claude-code": 2, "codex": 1}
+        assert p["protocol"] == "anthropic"
+
+    def test_legacy_entries_bucket_without_protocol(self, _log_dir):
+        _log_dir.mkdir(parents=True)
+        (_log_dir / "requests.jsonl").write_text(
+            '{"ts": "t1", "request_id": "r", "profile": "old", "token_count": 5}\n',
+            encoding="utf-8",
+        )
+        s = stats()
+        p = s["by_profile"]["old"]
+        assert p["protocol"] == ""
+        assert p["by_agent"] == {"(unknown)": 1}
 
     def test_errors_and_fallbacks(self, _log_dir):
         from awerouter.logging import append
@@ -287,6 +310,24 @@ class TestTail:
         from awerouter.logging import append
         append(_log("t0", "default", 1))
         assert tail(1)[0].request_id == "req-1"
+
+    def test_protocol_and_agent_roundtrip(self, _log_dir):
+        from awerouter.logging import append
+        append(_log("t0", "default", 1, protocol="openai-chat", agent="codex"))
+        e = tail(1)[0]
+        assert e.protocol == "openai-chat"
+        assert e.agent == "codex"
+
+    def test_legacy_entries_default_to_empty(self, _log_dir):
+        """Entries written before the fields existed still parse."""
+        _log_dir.mkdir(parents=True)
+        (_log_dir / "requests.jsonl").write_text(
+            '{"ts": "t0", "request_id": "r", "profile": "cc-1", "token_count": 1}\n',
+            encoding="utf-8",
+        )
+        e = tail(1)[0]
+        assert e.protocol == ""
+        assert e.agent == ""
 
     def test_none_reads_whole_file(self, _log_dir):
         from awerouter.logging import append

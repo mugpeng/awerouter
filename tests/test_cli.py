@@ -181,7 +181,7 @@ class TestUsage:
             ts="2026-08-16T00:00:00+00:00", request_id="r1", model_in="auto",
             label="default", destination="flash", provider="stepfun",
             model_out="sf-flash", status=200, ms=800, duration_ms=1500, bytes=100,
-            token_count=120, profile="cc-1",
+            token_count=120, profile="cc-1", protocol="anthropic", agent="claude-code",
         ))
 
     def test_bare_usage_shows_help(self, tmp_path, monkeypatch):
@@ -198,6 +198,8 @@ class TestUsage:
         r = CliRunner().invoke(cli, ["usage", "stats"])
         assert r.exit_code == 0, r.output
         assert "total_requests : 1" in r.output
+        assert "profile cc-1 [anthropic]" in r.output
+        assert "claude-code" in r.output
 
     def test_log_subcommand(self, tmp_path, monkeypatch):
         _setup(tmp_path, monkeypatch, _providers(), _routing())
@@ -206,6 +208,8 @@ class TestUsage:
         assert r.exit_code == 0, r.output
         assert "sf-flash" in r.output
         assert "tokens=120" in r.output
+        assert "anthropic" in r.output
+        assert "claude-code" in r.output
 
     def test_log_all(self, tmp_path, monkeypatch):
         _setup(tmp_path, monkeypatch, _providers(), _routing())

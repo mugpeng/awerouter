@@ -187,7 +187,8 @@ def _usage_log(n, since=None, profile_name=None):
         status_s = str(e.status) if e.status is not None else "-"
         dur_s = f"/{_fmt_ms(e.duration_ms)}" if e.duration_ms else ""
         click.echo(
-            f"{e.ts}  {e.request_id[:12]:12s}  {e.destination:7s}  "
+            f"{e.ts}  {e.request_id[:12]:12s}  {e.protocol or '-':16s}  "
+            f"{e.agent or '-':12s}  {e.destination:7s}  "
             f"{e.provider:12s}  {e.model_out:24s}  {e.label:14s}  "
             f"status={status_s:>3}  {_fmt_ms(e.ms)}{dur_s}  "
             f"tokens={e.token_count}  in={e.model_in}"
@@ -329,10 +330,13 @@ def _usage_stats(since, profile_name):
         click.echo()
         extras = (f", {p['errors']} error{'s' if p['errors'] != 1 else ''}"
                   f", {p['fallbacks']} fallback{'s' if p['fallbacks'] != 1 else ''}")
-        click.echo(f"profile {name}  ({p['requests']} requests, ~{p['flash_tokens']} flash tokens{extras}):")
+        proto_s = f" [{p['protocol']}]" if p.get("protocol") else ""
+        click.echo(f"profile {name}{proto_s}  ({p['requests']} requests, ~{p['flash_tokens']} flash tokens{extras}):")
         lat = p["latency"]
         click.echo("  by_label:")
         _echo_counts(p["by_label"], p["requests"])
+        click.echo("  by_agent:")
+        _echo_counts(p["by_agent"], p["requests"])
         click.echo("  by_destination:")
         for k, v in sorted(p["by_destination"].items()):
             pct = round(100 * v / p["requests"]) if p["requests"] else 0

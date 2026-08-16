@@ -61,6 +61,33 @@ def _set_auth(headers: dict, provider, env: dict | None = None) -> None:
     headers[provider.auth_header] = auth_value
 
 
+# Known clients and their User-Agent prefixes, normalized to a stable label.
+# awerouter only sees the wire request, so the UA header is the only place
+# the caller's identity exists (aweswitch launches clients outside our view).
+_AGENT_RULES = (
+    ("claude", "claude-code"),
+    ("codex", "codex"),
+    ("opencode", "opencode"),
+    ("cursor", "cursor"),
+    ("curl", "curl"),
+)
+
+
+def _agent_from_ua(ua: str) -> str:
+    """Best-effort caller identity: 'claude-cli/2.0 (external, cli)' → 'claude-code'.
+
+    Unknown but identifiable clients fall back to the first UA token
+    ('python-requests/2.31' → 'python-requests'); empty UA → ''.
+    """
+    if not ua:
+        return ""
+    token = ua.split()[0].split("/")[0].lower()
+    for prefix, label in _AGENT_RULES:
+        if prefix in token:
+            return label
+    return token
+
+
 # ---------------------------------------------------------------------------
 # Upstream proxy (single attempt)
 # ---------------------------------------------------------------------------
@@ -117,10 +144,11 @@ def _resolve_for_request(body: dict, profile, settings) -> ResolveResult:
 class _RoutingState:
     """Mutable routing state shared across the retry loop."""
 
-    def __init__(self, profile, settings, body: dict):
+    def __init__(self, profile, settings, body: dict, agent: str = ""):
         self.profile = profile
         self.body = body
         self.inbound_model = body.get("model") or ""
+        self.agent = agent
         self.result = _resolve_for_request(body, profile, settings)
         self.attempt = 0
         self.streaming_started = False
@@ -143,6 +171,8 @@ def _log_failure(state: _RoutingState, request_id: str, t0: float, status: int) 
         bytes=0,
         token_count=state.result.inspect.token_count,
         profile=state.profile.name,
+        protocol=state.profile.protocol,
+        agent=state.agent,
     ))
 
 
@@ -182,7 +212,7 @@ async def _proxy_flow(request: web.Request, endpoint_protocol: str) -> web.Strea
         sock_read=None if is_stream else 120,
     )
 
-    state = _RoutingState(profile, settings, body)
+    state = _RoutingState(profile, settings, body, _agent_from_ua(request.headers.get("User-Agent", "")))
 
     while True:
         dest_key = state.result.destination
@@ -265,6 +295,8 @@ async def _proxy_flow(request: web.Request, endpoint_protocol: str) -> web.Strea
             bytes=byte_count,
             token_count=state.result.inspect.token_count,
             profile=profile.name,
+            protocol=profile.protocol,
+            agent=state.agent,
         ))
 
         return resp
