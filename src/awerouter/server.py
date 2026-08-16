@@ -383,7 +383,7 @@ def create_app(providers: dict, profile, settings) -> web.Application:
     app["providers"] = providers
     app["profile"] = profile
     app["settings"] = settings
-    app["version"] = "0.1.0"
+    app["version"] = "0.2.9"
 
     session = aiohttp.ClientSession()
     app["session"] = session

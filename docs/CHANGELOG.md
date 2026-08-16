@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.2.9 - 2026-08-16
 
 ### Breaking
 - **CLI restructure**: `log`, `stats`, `savings`, and `calibrate` merge into one `usage` group — `awerouter usage [stats|tail|savings|calibrate]`. Bare `awerouter usage` shows the stats summary; window options (`--since`, `--profile`) sit between `usage` and the subcommand.
