@@ -445,9 +445,14 @@ async def _serve(host: str, port: int, providers: dict, profile, settings) -> No
     app = create_app(providers, profile, settings)
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, host=host, port=port)
-    await site.start()
-    print(f"awerouter listening on {host}:{port}  [{profile.name}]")
+    try:
+        site = web.TCPSite(runner, host=host, port=port)
+        await site.start()
+    except OSError:
+        site = web.TCPSite(runner, host=host, port=0)
+        await site.start()
+    actual_port = site._server.sockets[0].getsockname()[1]
+    print(f"awerouter listening on {host}:{actual_port}  [{profile.name}]")
     print(f"  protocol      -> {profile.protocol}")
     print(f"  bg            -> {settings.background_model}  "
           f"think -> {settings.think_model}  "
@@ -457,7 +462,7 @@ async def _serve(host: str, port: int, providers: dict, profile, settings) -> No
     print(f"  L3 threshold -> {profile.long_context_threshold}")
     display_host = "127.0.0.1" if host in ("0.0.0.0", "::") else host
     print()
-    print(_client_hint(profile.protocol, display_host, port, settings))
+    print(_client_hint(profile.protocol, display_host, actual_port, settings))
     warning = _loopback_proxy_warning()
     if warning:
         print()
