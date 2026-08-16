@@ -422,6 +422,38 @@ class TestOpenAIProtocols:
                 await up_server.close()
         run(t())
 
+    def test_unversioned_alias_routes(self):
+        """Clients whose base_url omits /v1 hit /chat/completions directly —
+        the alias must route and forward the canonical upstream path."""
+        async def t():
+            async def up(request):
+                body = await request.json()
+                return web.json_response({"model": body["model"]})
+
+            up_app = web.Application()
+            up_app.router.add_post("/chat/completions", up)
+            up_server = TestServer(up_app)
+            await up_server.start_server()
+            try:
+                profile = RoutingProfile("cx", "openai-chat", 32, {
+                    "flash": Destination("stepfun", "sf-flash"),
+                    "pro": Destination("anthropic", "gpt-pro"),
+                })
+                app = create_app(_providers(up_server.port), profile, SETTINGS)
+                async with TestClient(TestServer(app)) as c:
+                    r = await c.post("/chat/completions", json={
+                        "model": "auto",
+                        "messages": [{"role": "user", "content": "hi"}],
+                    })
+                    assert r.status == 200
+                    d = await r.json()
+                    assert d["model"] == "sf-flash"
+                    r2 = await c.get("/models")
+                    assert r2.status == 200
+            finally:
+                await up_server.close()
+        run(t())
+
     def test_protocol_mismatch_returns_clear_400(self):
         async def t():
             app = create_app(_providers(0), ROUTING, SETTINGS)  # anthropic profile

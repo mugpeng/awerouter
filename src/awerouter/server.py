@@ -395,6 +395,12 @@ def create_app(providers: dict, profile, settings) -> web.Application:
         web.post("/v1/messages/count_tokens", handle_count_tokens),
         web.post("/v1/chat/completions", handle_chat_completions),
         web.post("/v1/responses", handle_responses),
+        # Unversioned aliases: OpenAI-style clients whose base_url omits /v1
+        # (or includes it) both work. Handlers forward the canonical upstream
+        # path regardless of the inbound one.
+        web.get("/models", handle_models),
+        web.post("/chat/completions", handle_chat_completions),
+        web.post("/responses", handle_responses),
     ])
 
     async def on_cleanup(app):
@@ -421,7 +427,8 @@ def _client_hint(protocol: str, display_host: str, port: int, settings) -> str:
     wire_api = "chat" if protocol == "openai-chat" else "responses"
     return (
         "point your OpenAI client here:\n"
-        f"  export OPENAI_BASE_URL=http://{display_host}:{port}\n"
+        f"  export OPENAI_BASE_URL=http://{display_host}:{port}/v1\n"
+        f"  (base_url with or without /v1 both work)\n"
         f"  codex: set base_url to the same URL in config.toml (wire_api = \"{wire_api}\")"
     )
 

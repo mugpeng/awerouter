@@ -6,6 +6,7 @@
 - **CLI restructure**: `log`, `stats`, `savings`, and `calibrate` merge into one `usage` group — `awerouter usage [stats|tail|savings|calibrate]`. Bare `awerouter usage` shows the stats summary; window options (`--since`, `--profile`) sit between `usage` and the subcommand.
 
 ### Added
+- **Unversioned endpoint aliases**: `/chat/completions`, `/responses`, and `/models` are served alongside the `/v1/...` forms, so OpenAI-style clients work whether their base_url includes `/v1` or not. Fixes the `404: Not Found` hit by clients configured with a bare `http://127.0.0.1:20128` base (Anthropic clients append `/v1/messages` themselves; OpenAI clients append the bare path). The serve banner now suggests the standard `/v1` form for openai protocols.
 - Typo-friendly command resolution at every level (top level, `usage`, `config`): an unknown subcommand close to a real one gets a did-you-mean suggestion (`awerouter server x` → "did you mean 'serve'?"), and far-off tokens with stray arguments get a `-h` pointer instead of the cryptic "Got unexpected extra argument". Valid bare-profile launches (`awerouter <profile> [--port/--host]`) are unaffected.
 - `usage stats` rework: `~total_tokens` (estimated input message tokens) replaces the meaningless `total_bytes`; new `by_model` breakdown, error and fallback counts, and percentages on all breakdowns.
 - Latency percentiles per destination **and** per provider/model, in two flavors: first-byte (`ms`) and total request duration (`duration_ms`, now logged per request; legacy entries without it are excluded from totals).
