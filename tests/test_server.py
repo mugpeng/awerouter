@@ -112,6 +112,7 @@ class TestAwerouter:
                 from awerouter.logging import tail
                 entries = tail(1)
                 assert entries[0].request_id == "client-rid-123"
+                assert entries[0].profile == "test"
             finally:
                 await up_server.close()
         run(t())

@@ -166,7 +166,7 @@ def log(lines: int):
 
 @cli.command()
 def stats():
-    """Show aggregated routing stats."""
+    """Show aggregated routing stats, grouped by profile."""
     from awerouter.logging import stats as _stats
     s = _stats()
     if not s:
@@ -174,18 +174,24 @@ def stats():
         return
     click.echo(f"total_requests : {s['total_requests']}")
     click.echo(f"total_bytes    : {s['total_bytes']}")
-    click.echo()
-    click.echo("by_label:")
-    for k, v in sorted(s["by_label"].items()):
-        click.echo(f"  {k:16s} {v}")
-    click.echo()
-    click.echo("by_destination:")
-    for k, v in sorted(s["by_destination"].items()):
-        click.echo(f"  {k:10s} {v}")
-    click.echo()
-    click.echo("by_provider:")
-    for k, v in sorted(s["by_provider"].items()):
-        click.echo(f"  {k:16s} {v}")
+    if s["flash_requests"]:
+        click.echo(
+            f"pro input offloaded to flash: ~{s['flash_tokens']} tokens "
+            f"across {s['flash_requests']} requests"
+        )
+        click.echo("  (message tokens only — system prompt & tools excluded; conservative)")
+    for name, p in sorted(s["by_profile"].items()):
+        click.echo()
+        click.echo(f"profile {name}  ({p['requests']} requests, ~{p['flash_tokens']} flash tokens):")
+        click.echo("  by_label:")
+        for k, v in sorted(p["by_label"].items()):
+            click.echo(f"    {k:16s} {v}")
+        click.echo("  by_destination:")
+        for k, v in sorted(p["by_destination"].items()):
+            click.echo(f"    {k:10s} {v}")
+        click.echo("  by_provider:")
+        for k, v in sorted(p["by_provider"].items()):
+            click.echo(f"    {k:16s} {v}")
 
 
 @cli.command()

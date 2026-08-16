@@ -67,3 +67,4 @@ class RequestLog:
     ms: int
     bytes: int
     token_count: int
+    profile: str = ""

@@ -137,6 +137,7 @@ def _log_failure(state: _RoutingState, request_id: str, t0: float, status: int) 
         ms=int((time.monotonic() - t0) * 1000),
         bytes=0,
         token_count=state.result.inspect.token_count,
+        profile=state.profile.name,
     ))
 
 
@@ -232,6 +233,7 @@ async def handle_messages(request: web.Request) -> web.StreamResponse:
             ms=ms,
             bytes=byte_count,
             token_count=state.result.inspect.token_count,
+            profile=profile.name,
         ))
 
         return resp

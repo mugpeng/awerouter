@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- `stats` groups by routing profile and estimates **pro input offloaded to flash**: message tokens of flash-served requests a pro-only setup would have billed at pro's input price (system prompt and tools excluded, so conservative).
+- Request log records the serving profile (`profile` field); entries logged before this feature group under `(unknown)`.
+
 ## v0.1.5 - 2026-08-16
 
 Multi-provider profile-based routing, interactive onboarding, and code-quality hardening.

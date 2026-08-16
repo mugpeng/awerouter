@@ -9,11 +9,11 @@ from awerouter.logging import stats, tail, token_distribution
 from awerouter.types import RequestLog
 
 
-def _log(ts: str, label: str, token_count: int, destination="flash", bytes_=100):
+def _log(ts: str, label: str, token_count: int, destination="flash", bytes_=100, profile="cc-1"):
     return RequestLog(
         ts=ts, request_id="req-1", model_in="c1/pro", label=label, destination=destination,
         provider="p", model_out="m", status=200, ms=10, bytes=bytes_,
-        token_count=token_count,
+        token_count=token_count, profile=profile,
     )
 
 
@@ -28,16 +28,47 @@ class TestStats:
     def test_empty(self, _log_dir):
         assert stats() == {}
 
-    def test_aggregates(self, _log_dir):
+    def test_aggregates_by_profile(self, _log_dir):
         from awerouter.logging import append
-        append(_log("t1", "default", 10, "flash"))
-        append(_log("t2", "longContext", 500, "pro"))
+        append(_log("t1", "default", 10, "flash", profile="cc-1"))
+        append(_log("t2", "longContext", 500, "pro", profile="cc-1"))
+        append(_log("t3", "default", 7, "flash", profile="cc-2"))
         s = stats()
-        assert s["total_requests"] == 2
-        assert s["by_label"]["default"] == 1
-        assert s["by_label"]["longContext"] == 1
-        assert s["by_destination"]["flash"] == 1
-        assert s["by_destination"]["pro"] == 1
+        assert s["total_requests"] == 3
+        assert set(s["by_profile"]) == {"cc-1", "cc-2"}
+        p1 = s["by_profile"]["cc-1"]
+        assert p1["requests"] == 2
+        assert p1["by_label"]["default"] == 1
+        assert p1["by_label"]["longContext"] == 1
+        assert p1["by_destination"]["flash"] == 1
+        assert p1["by_destination"]["pro"] == 1
+
+    def test_unknown_profile_bucket(self, _log_dir):
+        """Log lines without a profile field (pre-feature) group under (unknown)."""
+        import json as _json
+        from awerouter.logging import _log_file, ensure_log_dir
+        ensure_log_dir()
+        with open(_log_file(), "a") as f:
+            f.write(_json.dumps({
+                "ts": "t0", "label": "default", "destination": "flash",
+                "provider": "p", "model_out": "m", "status": 200,
+                "ms": 1, "bytes": 1, "token_count": 5,
+            }) + "\n")
+        s = stats()
+        assert "(unknown)" in s["by_profile"]
+
+    def test_flash_offload_counts_flash_only(self, _log_dir):
+        """flash_tokens sums message tokens of flash-served requests (the
+        pro-input a single-pro setup would have billed)."""
+        from awerouter.logging import append
+        append(_log("t1", "default", 100, "flash"))           # counts
+        append(_log("t2", "background", 50, "flash"))         # counts
+        append(_log("t3", "longContext", 900, "pro"))         # excluded (served by pro)
+        append(_log("t4", "default→fallback", 200, "pro"))    # excluded (fell back to pro)
+        s = stats()
+        assert s["flash_tokens"] == 150
+        assert s["flash_requests"] == 2
+        assert s["by_profile"]["cc-1"]["flash_tokens"] == 150
 
 
 class TestTail:

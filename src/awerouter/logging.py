@@ -45,6 +45,7 @@ def append(log: RequestLog) -> None:
         f.write(json.dumps({
             "ts": log.ts,
             "request_id": log.request_id,
+            "profile": log.profile,
             "model_in": log.model_in,
             "label": log.label,
             "destination": log.destination,
@@ -90,6 +91,7 @@ def tail(n: int = 20) -> list[RequestLog]:
             result.append(RequestLog(
                 ts=data.get("ts", ""),
                 request_id=data.get("request_id", ""),
+                profile=data.get("profile", ""),
                 model_in=data.get("model_in", ""),
                 label=data.get("label", ""),
                 destination=data.get("destination", ""),
@@ -105,13 +107,25 @@ def tail(n: int = 20) -> list[RequestLog]:
     return result
 
 
+def _new_profile_bucket() -> dict:
+    return {
+        "requests": 0,
+        "bytes": 0,
+        # Estimated pro input saved: message tokens of requests served by flash
+        # that a pro-only setup would have billed at pro's input price.
+        "flash_tokens": 0,
+        "flash_requests": 0,
+        "by_label": {},
+        "by_destination": {},
+        "by_provider": {},
+    }
+
+
 def stats() -> dict:
     f = _log_file()
     if not f.exists():
         return {}
-    by_label: dict[str, int] = {}
-    by_dest: dict[str, int] = {}
-    by_provider: dict[str, int] = {}
+    by_profile: dict = {}
     total_bytes = 0
     total_requests = 0
     for line in f.read_text(encoding="utf-8").splitlines():
@@ -124,17 +138,26 @@ def stats() -> dict:
         label = data.get("label", "unknown")
         dest = data.get("destination", "unknown")
         prov = data.get("provider", "unknown")
-        by_label[label] = by_label.get(label, 0) + 1
-        by_dest[dest] = by_dest.get(dest, 0) + 1
-        by_provider[prov] = by_provider.get(prov, 0) + 1
+        tokens = data.get("token_count", 0)
+        bucket = by_profile.setdefault(
+            data.get("profile", "") or "(unknown)", _new_profile_bucket()
+        )
+        bucket["requests"] += 1
+        bucket["bytes"] += data.get("bytes", 0)
+        bucket["by_label"][label] = bucket["by_label"].get(label, 0) + 1
+        bucket["by_destination"][dest] = bucket["by_destination"].get(dest, 0) + 1
+        bucket["by_provider"][prov] = bucket["by_provider"].get(prov, 0) + 1
+        if dest == "flash":
+            bucket["flash_tokens"] += tokens
+            bucket["flash_requests"] += 1
         total_bytes += data.get("bytes", 0)
         total_requests += 1
     return {
         "total_requests": total_requests,
         "total_bytes": total_bytes,
-        "by_label": by_label,
-        "by_destination": by_dest,
-        "by_provider": by_provider,
+        "flash_tokens": sum(p["flash_tokens"] for p in by_profile.values()),
+        "flash_requests": sum(p["flash_requests"] for p in by_profile.values()),
+        "by_profile": by_profile,
     }
 
 
