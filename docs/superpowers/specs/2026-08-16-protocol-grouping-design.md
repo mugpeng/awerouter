@@ -35,8 +35,10 @@ request-side signal extraction is per-protocol.
   `openai-chat` / `openai-responses`).
 - routing.json: `"agent"` → `"protocol"` (same value space). Old field fails
   with a rename hint. Unknown protocol ids fail with the valid list.
-- base_url semantics: prefix before the protocol's endpoint path (unchanged
-  for anthropic; openai providers drop the trailing `/v1`).
+- base_url semantics: each native client's convention — anthropic =
+  `ANTHROPIC_BASE_URL` style (no `/v1`; awerouter appends `/v1/messages`),
+  openai = `OPENAI_BASE_URL` style (includes `/v1`; awerouter appends
+  `/chat/completions` / `/responses`). Copy verbatim from client configs.
 - `add` wizard / `list` / `show` / validation use the protocol field.
 
 ### New module: protocols.py

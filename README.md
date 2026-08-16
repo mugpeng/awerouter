@@ -62,23 +62,23 @@ Two files in `~/.config/awerouter/` (override with `AWEROUTER_CONFIG_DIR`):
     "anthropic": { "base_url": "https://api.anthropic.com",          "auth": "${ANTHROPIC_KEY}" }
   },
   "openai-chat": {
-    "stepfun": { "base_url": "https://api.stepfun.com", "auth": "${STEPFUN_AUTH_TOKEN}" }
+    "stepfun": { "base_url": "https://api.stepfun.com/step_plan/v1", "auth": "${STEPFUN_AUTH_TOKEN}" }
   },
   "openai-responses": {
-    "openai": { "base_url": "https://api.openai.com", "auth": "${OPENAI_API_KEY}" }
+    "openai": { "base_url": "https://api.openai.com/v1", "auth": "${OPENAI_API_KEY}" }
   }
 }
 ```
 
-Three protocols are supported, each with its own endpoint appended to `base_url`:
+Three protocols are supported. `base_url` uses each native client's convention — copy it verbatim from your client config; awerouter appends the endpoint path the same way the native client would:
 
-| Protocol id         | Endpoint                   | Typical client                              |
-|---------------------|----------------------------|---------------------------------------------|
-| `anthropic`         | `base_url + /v1/messages`  | Claude Code (`ANTHROPIC_BASE_URL`)          |
-| `openai-chat`       | `base_url + /v1/chat/completions` | OpenAI-compatible clients; Codex with `wire_api = "chat"` |
-| `openai-responses`  | `base_url + /v1/responses` | Codex (`wire_api = "responses"`)            |
+| Protocol id         | `base_url` style | Endpoint |
+|---------------------|------------------|----------|
+| `anthropic`         | `ANTHROPIC_BASE_URL` (no `/v1`) | `base_url + /v1/messages` |
+| `openai-chat`       | `OPENAI_BASE_URL` (includes version segment) | `base_url + /chat/completions` |
+| `openai-responses`  | `OPENAI_BASE_URL` (includes version segment) | `base_url + /responses` |
 
-`base_url` is the prefix before the endpoint path — for openai providers, drop the trailing `/v1`.
+The same provider often uses a different path per protocol — GLM for instance: `https://open.bigmodel.cn/api/coding/paas/v4` for chat completions but `https://open.bigmodel.cn/api/v1` for responses. That's why each protocol group carries its own `base_url`.
 
 The auth header is **auto-detected from `base_url`**: `anthropic.com` → `x-api-key` (bare token); everyone else → `Authorization` (auto-prefixes `Bearer `). No `auth_header` field needed unless the heuristic is wrong.
 

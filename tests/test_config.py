@@ -125,7 +125,7 @@ class TestLoadProviders:
         monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
         _write_config(tmp_path, {
             "anthropic": {"p": {"base_url": "https://api.stepfun.com/step_plan", "auth": "${K}"}},
-            "openai-chat":  {"p": {"base_url": "https://api.stepfun.com",      "auth": "${K}"}},
+            "openai-chat":  {"p": {"base_url": "https://api.stepfun.com/step_plan/v1", "auth": "${K}"}},
         }, {})
         result = load_providers()
         assert "anthropic" in result and "openai-chat" in result

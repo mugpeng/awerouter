@@ -4,9 +4,11 @@
     "anthropic": { "base_url": "https://api.anthropic.com",          "auth": "${ANTHROPIC_KEY}" }
   },
   "openai-chat": {
-    "stepfun": { "base_url": "https://api.stepfun.com", "auth": "${STEPFUN_AUTH_TOKEN}" }
+    "stepfun": { "base_url": "https://api.stepfun.com/step_plan/v1",     "auth": "${STEPFUN_AUTH_TOKEN}" },
+    "glm":     { "base_url": "https://open.bigmodel.cn/api/coding/paas/v4", "auth": "${GLM_API_KEY}" }
   },
   "openai-responses": {
-    "openai": { "base_url": "https://api.openai.com", "auth": "${OPENAI_API_KEY}" }
+    "openai": { "base_url": "https://api.openai.com/v1",        "auth": "${OPENAI_API_KEY}" },
+    "glm":    { "base_url": "https://open.bigmodel.cn/api/v1",  "auth": "${GLM_API_KEY}" }
   }
 }

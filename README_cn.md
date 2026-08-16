@@ -62,23 +62,23 @@ export ANTHROPIC_BASE_URL=http://127.0.0.1:20128
     "anthropic": { "base_url": "https://api.anthropic.com",          "auth": "${ANTHROPIC_KEY}" }
   },
   "openai-chat": {
-    "stepfun": { "base_url": "https://api.stepfun.com", "auth": "${STEPFUN_AUTH_TOKEN}" }
+    "stepfun": { "base_url": "https://api.stepfun.com/step_plan/v1", "auth": "${STEPFUN_AUTH_TOKEN}" }
   },
   "openai-responses": {
-    "openai": { "base_url": "https://api.openai.com", "auth": "${OPENAI_API_KEY}" }
+    "openai": { "base_url": "https://api.openai.com/v1", "auth": "${OPENAI_API_KEY}" }
   }
 }
 ```
 
-支持三种协议，各自的端点路径拼在 `base_url` 后面：
+支持三种协议。`base_url` 沿用各原生客户端的写法——从客户端配置里原样抄过来即可，awerouter 按原生客户端同样的规则拼接端点路径：
 
-| 协议 id | 端点 | 典型客户端 |
-|---------|------|-----------|
-| `anthropic` | `base_url + /v1/messages` | Claude Code（`ANTHROPIC_BASE_URL`） |
-| `openai-chat` | `base_url + /v1/chat/completions` | OpenAI 兼容客户端；Codex（`wire_api = "chat"`） |
-| `openai-responses` | `base_url + /v1/responses` | Codex（`wire_api = "responses"`） |
+| 协议 id | `base_url` 写法 | 端点 |
+|---------|----------------|------|
+| `anthropic` | `ANTHROPIC_BASE_URL` 风格（不带 `/v1`） | `base_url + /v1/messages` |
+| `openai-chat` | `OPENAI_BASE_URL` 风格（含版本段） | `base_url + /chat/completions` |
+| `openai-responses` | `OPENAI_BASE_URL` 风格（含版本段） | `base_url + /responses` |
 
-`base_url` 填协议端点之前的前缀——openai 系 provider 不要带尾部 `/v1`。
+同一家 provider 的两个协议路径往往不同——比如 GLM：chat completions 是 `https://open.bigmodel.cn/api/coding/paas/v4`，responses 是 `https://open.bigmodel.cn/api/v1`。所以每个协议分组各配各的 `base_url`。
 
 鉴权头**根据 `base_url` 自动判断**：`anthropic.com` → `x-api-key`（裸 token）；其他 → `Authorization`（自动补 `Bearer `）。除非启发式判断错了，否则不需要填 `auth_header`。
 

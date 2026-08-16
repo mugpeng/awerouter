@@ -11,11 +11,13 @@ from awerouter.types import InspectResult
 
 PROTOCOL_IDS = ("anthropic", "openai-chat", "openai-responses")
 
-# Upstream path appended to a provider's base_url.
+# Upstream path appended to a provider's base_url. base_url uses the native
+# client convention: anthropic = ANTHROPIC_BASE_URL style (no /v1),
+# openai = OPENAI_BASE_URL style (includes /v1).
 ENDPOINT_PATHS = {
     "anthropic": "/v1/messages",
-    "openai-chat": "/v1/chat/completions",
-    "openai-responses": "/v1/responses",
+    "openai-chat": "/chat/completions",
+    "openai-responses": "/responses",
 }
 
 

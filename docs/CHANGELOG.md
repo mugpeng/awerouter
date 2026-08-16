@@ -6,7 +6,7 @@ Protocol-based provider grouping with same-protocol passthrough for all three ma
 
 ### Breaking
 - **Config schema**: `providers.json` outer keys are now protocol ids (`anthropic` / `openai-chat` / `openai-responses`) instead of agent names; `routing.json` profiles declare `protocol` instead of `agent`. Old configs fail at load with rename hints (`claude` → `anthropic`, `codex` → `openai-chat` / `openai-responses`).
-- **base_url semantics** for openai providers: prefix before the endpoint path — drop the trailing `/v1` (awerouter appends `/v1/chat/completions` or `/v1/responses` itself).
+- **base_url semantics** follow each native client's convention: anthropic = `ANTHROPIC_BASE_URL` style (no `/v1`, awerouter appends `/v1/messages`); openai = `OPENAI_BASE_URL` style (includes the version segment, awerouter appends `/chat/completions` or `/responses`). Copy the URL verbatim from your client config — the same provider can use different paths per protocol (e.g. GLM: `.../api/coding/paas/v4` for chat, `.../api/v1` for responses).
 
 ### Added
 - **OpenAI protocol support, same-protocol passthrough** (no translation): `POST /v1/chat/completions` and `POST /v1/responses` are served alongside `/v1/messages`. The response path stays opaque byte streaming; only request-side signal extraction is per protocol.

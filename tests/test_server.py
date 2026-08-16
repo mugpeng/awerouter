@@ -372,7 +372,7 @@ class TestOpenAIProtocols:
                 return web.json_response({"model": body["model"]})
 
             up_app = web.Application()
-            up_app.router.add_post("/v1/chat/completions", up)
+            up_app.router.add_post("/chat/completions", up)
             up_server = TestServer(up_app)
             await up_server.start_server()
             try:
@@ -400,7 +400,7 @@ class TestOpenAIProtocols:
                 return web.json_response({"model": body["model"]})
 
             up_app = web.Application()
-            up_app.router.add_post("/v1/responses", up)
+            up_app.router.add_post("/responses", up)
             up_server = TestServer(up_app)
             await up_server.start_server()
             try:
