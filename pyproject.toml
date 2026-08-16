@@ -4,10 +4,23 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "awerouter"
-version = "0.1.5"
+version = "0.2.0"
 description = "Smart LLM router: fast cheap tasks to flash, hard decisions to pro."
+readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MPL-2.0" }
+authors = [
+  { name = "Peng" }
+]
+keywords = ["ai", "llm", "router", "claude", "proxy", "claude-code"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Topic :: Utilities"
+]
 dependencies = [
     "click>=8.1",
     "aiohttp>=3.9",

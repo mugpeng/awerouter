@@ -1,10 +1,20 @@
 # Changelog
 
-## Unreleased
+## v0.2.0 - 2026-08-16
+
+Per-profile observability, project support, and release automation.
 
 ### Added
 - `stats` groups by routing profile and estimates **pro input offloaded to flash**: message tokens of flash-served requests a pro-only setup would have billed at pro's input price (system prompt and tools excluded, so conservative).
 - Request log records the serving profile (`profile` field); entries logged before this feature group under `(unknown)`.
+- Project support: Ko-fi badge and Support section in both READMEs, `FUNDING.yml` for the GitHub sponsor button, WeChat Pay QR under `assets/images/`.
+- CI workflow: test matrix (Ubuntu/macOS/Windows × Python 3.9/3.13) plus build/twine-check package job on `main` and `dev`.
+- Release automation: pushing a `v*` tag verifies tag↔version match, runs tests, builds, extracts the changelog entry into the GitHub Release, and publishes to PyPI (`PYPI_API_TOKEN` secret).
+- PyPI package metadata: readme, author, keywords, classifiers; `MANIFEST.in` ships READMEs and assets in the sdist.
+- `docs/CONTRIBUTING.md`.
+
+### Fixed
+- `__version__` in `awerouter/__init__.py` had drifted from `pyproject.toml`; both now track the release version.
 
 ## v0.1.5 - 2026-08-16
 

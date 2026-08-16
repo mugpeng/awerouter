@@ -7,15 +7,19 @@
     <strong>简体中文</strong>
   </p>
   <p>
-    <img src="https://img.shields.io/badge/version-0.1.5-7C3AED?style=flat-square" alt="Version">
+    <img src="https://img.shields.io/pypi/v/awerouter?style=flat-square&color=7C3AED" alt="Version">
     <img src="https://img.shields.io/badge/python-%E2%89%A53.9-0EA5E9?style=flat-square" alt="Python">
+    <img src="https://img.shields.io/badge/license-MPL--2.0-22C55E?style=flat-square" alt="License">
   </p>
   <p>
     <img src="https://img.shields.io/badge/status-alpha-c96a3d?style=flat-square" alt="Status">
     <img src="https://img.shields.io/badge/install-pip-22C55E?style=flat-square" alt="pip">
     <img src="https://img.shields.io/badge/platform-terminal-334155?style=flat-square" alt="Platform">
     <img src="https://img.shields.io/pypi/dm/awerouter?style=flat-square" alt="Downloads">
-    <img src="https://img.shields.io/github/stars/owner/awerouter?style=flat-square" alt="Stars">
+    <img src="https://img.shields.io/github/stars/mugpeng/awerouter?style=flat-square" alt="Stars">
+  </p>
+  <p>
+    <a href="https://ko-fi.com/mugpeng"><img src="https://img.shields.io/badge/Ko--fi-Buy%20me%20a%20coffee-FF5E5B?style=flat-square&logo=ko-fi&logoColor=white" alt="Ko-fi"></a>
   </p>
 </div>
 
@@ -132,8 +136,24 @@ export no_proxy=127.0.0.1,localhost NO_PROXY=127.0.0.1,localhost
 ## 开发
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/mugpeng/awerouter
 cd awerouter
 pip install -e ".[dev]"
 pytest
 ```
+
+架构说明、配置语义和发布流程见 [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)。
+
+## 支持一下
+
+如果 awerouter 帮你省了钱，欢迎支持一下：
+
+- ⭐ 给项目点个 Star — 让更多人看到它。
+- ☕ [Ko-fi](https://ko-fi.com/mugpeng) — 请我喝杯咖啡。
+- 💬 微信 — 扫描下方收款码。
+
+<p align="center">
+  <img src="assets/images/wechat-pay.jpg" alt="微信收款码" width="240">
+</p>
+
+> awerouter 是免费开源的，你的支持让它持续维护下去 — 谢谢。
