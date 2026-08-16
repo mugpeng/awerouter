@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "awerouter"
-version = "0.3.0"
+version = "0.3.1"
 description = "Smart LLM router: fast cheap tasks to flash, hard decisions to pro."
 readme = "README.md"
 requires-python = ">=3.9"

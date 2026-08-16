@@ -36,7 +36,6 @@ You may run these read-only or non-interactive commands:
 - `awerouter config show`
 - `awerouter config edit`
 - `awerouter list`
-- `awerouter show [PROFILE]`
 - `awerouter usage stats`
 - `awerouter usage tail`
 - `awerouter usage calibrate`
@@ -130,7 +129,6 @@ Run:
 awerouter config path
 awerouter config show
 awerouter list
-awerouter show <profile>
 ```
 
 ### Edit a routing profile

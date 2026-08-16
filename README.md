@@ -75,7 +75,7 @@ The agent will install the CLI, init config, help you add profiles, and install 
 > "Tune longContextThreshold from my usage."
 > "Explain my usage savings."
 
-The agent can run read-only commands (`list`, `show`, `config show`, `usage stats`, `usage calibrate`, `usage savings`) and edit config directly, but it will **not** run `awerouter serve` — that would start a long-lived daemon inside the agent. To start the daemon, run it in your own terminal:
+The agent can run read-only commands (`list`, `config show`, `usage stats`, `usage calibrate`, `usage savings`) and edit config directly, but it will **not** run `awerouter serve` — that would start a long-lived daemon inside the agent. To start the daemon, run it in your own terminal:
 
 ```bash
 awerouter serve cc-router-1
@@ -206,11 +206,9 @@ CC's `/model` picker sets the tier model id (c1/flash / c1/pro / c1/think). awer
 awerouter init                        # create default config (= config init)
 awerouter add                         # interactively add a profile (and new providers)
 awerouter list                        # list profiles (name, protocol, flash, pro, threshold)
-awerouter show [PROFILE]              # show one profile or all config (redacted)
 awerouter serve [PROFILE] [--port 20128] [--host 127.0.0.1]
 awerouter <PROFILE>                   # shorthand for serve PROFILE
 awerouter config path | show | edit | init
-awerouter usage [--since 7d] [--profile NAME]     # stats summary (default view)
 awerouter usage stats [--clean]
 awerouter usage tail [--lines 20]
 awerouter usage calibrate

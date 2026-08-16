@@ -1,4 +1,4 @@
-"""CLI commands: serve / add / list / show / log / stats / calibrate.
+"""CLI commands: serve / add / list / config / usage.
 
 Imports the click group from config.py and extends it.
 """
@@ -12,8 +12,6 @@ from awerouter.config import (
     cli as config_cli,
     config_dir,
     die,
-    format_providers_display,
-    format_routing_display,
     init_config,
     load_default_profile,
     load_for_profile,
@@ -120,33 +118,6 @@ def list_profiles():
         )
 
 
-@cli.command()
-@click.argument("profile", required=False)
-def show(profile):
-    """Show PROFILE (or the whole config) with secrets redacted."""
-    providers_all = load_providers()
-    settings, profiles = load_routing()
-    validate_profiles(providers_all, profiles)
-    if not profile:
-        click.echo("providers.json:")
-        click.echo(format_providers_display(providers_all))
-        click.echo()
-        click.echo("routing.json:")
-        click.echo(format_routing_display(settings, profiles))
-        return
-    if profile not in profiles:
-        avail = ", ".join(profiles) or "(none)"
-        die(f"profile '{profile}' not found in routing.json; available: {avail}")
-    p = profiles[profile]
-    used = {d.provider_name: providers_all[p.protocol][d.provider_name]
-            for d in p.destinations.values()}
-    click.echo("providers:")
-    click.echo(format_providers_display({p.protocol: used}))
-    click.echo()
-    click.echo("profile:")
-    click.echo(format_routing_display(settings, {profile: p}))
-
-
 def _passes_log(entry, cutoff, profile_name) -> bool:
     if cutoff is not None:
         ts = entry.ts
@@ -246,13 +217,13 @@ def _window_cutoff(since, profile_name):
     return cutoff
 
 
-@cli.group(cls=SuggestGroup, invoke_without_command=True)
+@cli.group(cls=SuggestGroup)
 @click.option("--since", default=None,
               help="Count entries from this point on: 'today', 'yesterday', Nd (e.g. 7d), or YYYY-MM-DD.")
 @click.option("--profile", "profile_name", default=None, help="Count entries for one routing profile only.")
 @click.pass_context
 def usage(ctx, since, profile_name):
-    """Usage analytics over the request log (stats is the default view).
+    """Usage analytics over the request log.
 
     Window options sit between `usage` and the subcommand, e.g.:
 
@@ -261,8 +232,6 @@ def usage(ctx, since, profile_name):
     ctx.ensure_object(dict)
     ctx.obj["since"] = since
     ctx.obj["profile"] = profile_name
-    if ctx.invoked_subcommand is None:
-        _usage_stats(since, profile_name)
 
 
 @usage.command()

@@ -63,7 +63,7 @@ provider (flash: cheap/fast — pro: strong/accurate)
 Key design decisions:
 
 - **Context lives in the client.** Every request carries the full history; the router keeps no session state, so restarts are lossless and routing is decided per request.
-- **Three-layer first-match-wins routing.** L1/L2 are exact signals; L3 is the only threshold-sensitive layer, tunable via `awerouter calibrate`.
+- **Three-layer first-match-wins routing.** L1/L2 are exact signals; L3 is the only threshold-sensitive layer, tunable via `awerouter usage calibrate`.
 - **Opaque response path.** The proxy streams response bytes through untouched. Anything that needs response parsing (e.g., output-token accounting) must justify breaking this property.
 - **Fallback only before the first byte.** Once streaming starts, a request is never re-attempted, so clients never see duplicated output.
 
@@ -76,8 +76,8 @@ Two files in `~/.config/awerouter/` (override with `AWEROUTER_CONFIG_DIR`):
 
 Rules:
 
-- `config show`/`show`/`list` cross-validate destinations against providers, so bad references fail at load time.
-- Never print raw secret values; `show` redacts literal keys.
+- `config show`/`list` cross-validate destinations against providers, so bad references fail at load time.
+- Never print raw secret values; `config show` redacts literal keys.
 - One `serve` process serves exactly one profile.
 
 ## Logging

@@ -12,7 +12,7 @@ This document is for AI coding agents. Help the user install and configure `awer
 
 **Never run `awerouter serve` inside this agent.** It starts a long-lived proxy session. Always tell the user to run it in their own terminal.
 
-You may run these read-only or non-interactive commands: `awerouter init`, `awerouter config path`, `awerouter config show`, `awerouter config edit`, `awerouter list`, `awerouter show [PROFILE]`, `awerouter usage stats`, `awerouter usage tail`, `awerouter usage calibrate`, `awerouter usage savings`.
+You may run these read-only or non-interactive commands: `awerouter init`, `awerouter config path`, `awerouter config show`, `awerouter config edit`, `awerouter list`, `awerouter usage stats`, `awerouter usage tail`, `awerouter usage calibrate`, `awerouter usage savings`.
 
 Do not run `awerouter add` inside the agent — it is interactive and would block the session.
 
@@ -246,7 +246,6 @@ If only one routing profile exists, the profile name is optional.
 Run these checks:
 ```bash
 awerouter list
-awerouter show <profile>
 awerouter config show
 awerouter usage stats
 awerouter usage calibrate

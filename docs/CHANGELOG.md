@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.3.1 - 2026-08-16
+
+### Changed
+- **CLI cleanup**: removed `awerouter show` (use `awerouter config show` instead) and removed the bare `awerouter usage` default view (use `awerouter usage stats` explicitly).
+
 ## v0.3.0 - 2026-08-16
 
 ### Added

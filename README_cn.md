@@ -75,7 +75,7 @@ Agent 会安装 CLI、初始化配置、帮你添加 profile，并通过 [aweski
 > "根据 usage 帮我调一下 longContextThreshold。"
 > "解释一下我的 usage savings。"
 
-Agent 可以直接运行只读命令（`list`、`show`、`config show`、`usage stats`、`usage calibrate`、`usage savings`）并编辑配置，但**不会**运行 `awerouter serve` —— 那会在 agent 内部启动一个常驻 daemon。要启动 daemon，请在你自己的终端运行：
+Agent 可以直接运行只读命令（`list`、`config show`、`usage stats`、`usage calibrate`、`usage savings`）并编辑配置，但**不会**运行 `awerouter serve` —— 那会在 agent 内部启动一个常驻 daemon。要启动 daemon，请在你自己的终端运行：
 
 ```bash
 awerouter serve cc-router-1
@@ -206,11 +206,9 @@ CC 的 `/model` 选择器设置 tier model id（c1/flash / c1/pro / c1/think）�
 awerouter init                        # 创建默认配置（= config init）
 awerouter add                         # 交互式添加 profile（含新 provider）
 awerouter list                        # 列出 profile（名字、协议、flash、pro、阈值）
-awerouter show [PROFILE]              # 查看单个 profile 或全部配置（脱敏）
 awerouter serve [PROFILE] [--port 20128] [--host 127.0.0.1]
 awerouter <PROFILE>                   # serve 的简写
 awerouter config path | show | edit | init
-awerouter usage [--since 7d] [--profile NAME]     # stats 摘要（默认视图）
 awerouter usage stats [--clean]
 awerouter usage tail [--lines 20]
 awerouter usage calibrate

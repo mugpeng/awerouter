@@ -102,28 +102,6 @@ class TestList:
         assert any(l.startswith("cc-2\tanthropic\tstepfun/sf-flash\tstepfun/sf-pro\tL3>4000") for l in lines)
 
 
-class TestShow:
-    def test_show_all_without_arg(self, tmp_path, monkeypatch):
-        _setup(tmp_path, monkeypatch, _providers(), _routing())
-        r = CliRunner().invoke(cli, ["show"])
-        assert r.exit_code == 0
-        assert "providers.json" in r.output
-        assert "cc-1" in r.output
-
-    def test_show_single_profile(self, tmp_path, monkeypatch):
-        _setup(tmp_path, monkeypatch, _providers(), _routing())
-        r = CliRunner().invoke(cli, ["show", "cc-1"])
-        assert r.exit_code == 0
-        assert "stepfun/sf-flash" in r.output or "sf-flash" in r.output
-        assert "cc-2" not in r.output.replace("available", "")  # other profile not shown
-
-    def test_show_unknown_profile_dies(self, tmp_path, monkeypatch):
-        _setup(tmp_path, monkeypatch, _providers(), _routing())
-        r = CliRunner().invoke(cli, ["show", "nope"])
-        assert r.exit_code != 0
-        assert "not found" in r.output
-
-
 class TestAdd:
     def test_wizard_new_and_existing_provider(self, tmp_path, monkeypatch):
         _setup(tmp_path, monkeypatch, _providers(), _routing())
@@ -186,18 +164,13 @@ class TestUsage:
             token_count=120, profile="cc-1",
         ))
 
-    def test_bare_usage_shows_summary(self, tmp_path, monkeypatch):
+    def test_bare_usage_shows_help(self, tmp_path, monkeypatch):
         _setup(tmp_path, monkeypatch, _providers(), _routing())
         self._seed_log(tmp_path, monkeypatch)
         r = CliRunner().invoke(cli, ["usage"])
-        assert r.exit_code == 0, r.output
-        assert "total_requests : 1" in r.output
-        assert "~total_tokens  : 120" in r.output
-        assert "total_bytes" not in r.output
-        assert "by_model" in r.output
-        assert "sf-flash" in r.output
-        assert "errors         : 0" in r.output
-        assert "total p50" in r.output  # duration percentiles shown
+        assert r.exit_code != 0, r.output
+        assert "Usage:" in r.output
+        assert "total_requests" not in r.output  # no default view
 
     def test_stats_subcommand(self, tmp_path, monkeypatch):
         _setup(tmp_path, monkeypatch, _providers(), _routing())
@@ -233,7 +206,7 @@ class TestUsage:
     def test_since_window_on_group(self, tmp_path, monkeypatch):
         _setup(tmp_path, monkeypatch, _providers(), _routing())
         self._seed_log(tmp_path, monkeypatch)
-        r = CliRunner().invoke(cli, ["usage", "--since", "today"])
+        r = CliRunner().invoke(cli, ["usage", "--since", "today", "stats"])
         assert r.exit_code == 0, r.output
         # entry ts is 2026-08-16 UTC midnight; depending on local tz it may fall
         # inside or before today's window — either way the window line prints
