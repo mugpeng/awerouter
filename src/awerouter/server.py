@@ -433,10 +433,13 @@ async def _serve(host: str, port: int, providers: dict, profile, settings) -> No
     site = web.TCPSite(runner, host=host, port=port)
     await site.start()
     print(f"awerouter listening on {host}:{port}  [{profile.name}]")
-    print(f"  protocol -> {profile.protocol}")
-    print(f"  bg     -> {settings.background_model}  think -> {settings.think_model}  main -> auto")
+    print(f"  protocol      -> {profile.protocol}")
+    print(f"  bg            -> {settings.background_model}  "
+          f"think -> {settings.think_model}  "
+          f"main -> auto  web_search -> {settings.web_search_model}")
     print(f"  flash  -> {profile.destinations['flash'].provider_name}/{profile.destinations['flash'].model}")
     print(f"  pro    -> {profile.destinations['pro'].provider_name}/{profile.destinations['pro'].model}")
+    print(f"  L3 threshold -> {profile.long_context_threshold}")
     display_host = "127.0.0.1" if host in ("0.0.0.0", "::") else host
     print()
     print(_client_hint(profile.protocol, display_host, port, settings))

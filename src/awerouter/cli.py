@@ -147,9 +147,29 @@ def show(profile):
     click.echo(format_routing_display(settings, {profile: p}))
 
 
-def _usage_tail(lines: int):
-    from awerouter.logging import tail
-    entries = tail(lines)
+def _passes_log(entry, cutoff, profile_name) -> bool:
+    if cutoff is not None:
+        ts = entry.ts
+        try:
+            from datetime import datetime, timezone
+            dt = datetime.fromisoformat(ts)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            if dt < cutoff:
+                return False
+        except (ValueError, TypeError):
+            return False
+    if profile_name is not None and (entry.profile or "(unknown)") != profile_name:
+        return False
+    return True
+
+
+def _usage_tail(lines: int, since=None, profile_name=None):
+    from awerouter.logging import tail as _tail
+    entries = _tail(lines)
+    if since or profile_name:
+        cutoff = _parse_since(since) if since else None
+        entries = [e for e in entries if _passes_log(e, cutoff, profile_name)]
     if not entries:
         click.echo("(no logs yet)")
         return
@@ -247,9 +267,10 @@ def usage(ctx, since, profile_name):
 
 @usage.command()
 @click.option("--lines", default=20, show_default=True, help="Tail N entries.")
-def tail(lines: int):
+@click.pass_context
+def tail(ctx, lines: int):
     """Show recent request log entries verbatim."""
-    _usage_tail(lines)
+    _usage_tail(lines, ctx.obj["since"], ctx.obj["profile"])
 
 
 @usage.command()
