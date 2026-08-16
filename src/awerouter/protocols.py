@@ -172,6 +172,8 @@ def _has_web_search_responses(body: dict) -> bool:
         if not isinstance(tool, dict):
             continue
         if tool.get("type") == "web_search":
+            if tool.get("external_web_access") is False:
+                continue
             return True
         if tool.get("name", "").startswith("web_search_"):
             return True

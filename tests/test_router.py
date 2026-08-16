@@ -161,6 +161,13 @@ class TestExtractOpenAIResponses:
         r = extract("openai-responses", {"input": [], "tools": [{"type": "web_search"}]})
         assert r.has_web_search is True
 
+    def test_builtin_web_search_disabled(self):
+        r = extract("openai-responses", {
+            "input": [],
+            "tools": [{"type": "web_search", "external_web_access": False}],
+        })
+        assert r.has_web_search is False
+
     def test_flat_function_tool_web_search(self):
         r = extract("openai-responses", {
             "input": [],
@@ -288,3 +295,9 @@ class TestResolveAcrossProtocols:
         r = resolve("auto", extract(protocol, body), _cfg(), "flash", "think", 8)
         assert r.destination == "pro"
         assert r.label == "longContext"
+
+    def test_web_search_disabled_does_not_force_pro(self):
+        body = {"input": "hi", "tools": [{"type": "web_search", "external_web_access": False}]}
+        r = resolve("auto", extract("openai-responses", body), _cfg(), "flash", "think", 8)
+        assert r.destination == "flash"
+        assert r.label == "default"
