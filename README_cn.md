@@ -173,6 +173,7 @@ aweswitch oc-awerouter
   },
   "cc-router-1": {
     "protocol": "anthropic",
+    "port": 20128,
     "longContextThreshold": 8000,
     "destinations": {
       "flash": "stepfun,step-3.7-flash",
@@ -187,6 +188,8 @@ aweswitch oc-awerouter
 密钥用 `${ENV_VAR}` 引用。缺失的环境变量在启动时报错退出。
 
 > **基于 profile 的路由：** `routing.json` 用 profile id 分组（类似 aweswitch）。`awerouter serve <profile>` 启动其中一个；只有一个 profile 时自动选择。`protocol` 字段把 profile 映射到 providers.json 的分组，并决定它服务哪个端点——serve 横幅按协议打印对应客户端的环境变量（anthropic → Claude Code 的 `ANTHROPIC_BASE_URL`；openai 协议 → `OPENAI_BASE_URL` / Codex `wire_api`）。注意：openai 客户端是单 model 配置，L2 档位匹配基本不触发——openai 流量走 L1 + L3，默认 flash。
+
+> **每个 profile 固定端口：** 可选的 `port` 字段为 profile 固定监听端口（`awerouter list` 会显示），客户端 base URL 从此不会因重启而失效。优先级：`--port` 参数 > profile `port` > 默认 20128。显式指定的端口被占用时会直接报错退出，不再悄悄漂到随机端口——只有未配置任何端口的默认 20128 保留随机回退。
 
 ## 路由逻辑
 
@@ -205,8 +208,8 @@ CC 的 `/model` 选择器设置 tier model id（c1/flash / c1/pro / c1/think）�
 ```bash
 awerouter init                        # 从模板创建默认配置
 awerouter add                         # 交互式添加 profile（先选类别再选 provider）
-awerouter list                        # 列出 profile（名字、协议、flash、pro、阈值）
-awerouter serve [PROFILE] [--port 20128] [--host 127.0.0.1]
+awerouter list                        # 列出 profile（名字、协议、端口、flash、pro、阈值）
+awerouter serve [PROFILE] [--port N] [--host 127.0.0.1]  # 端口优先级：--port > profile 'port' > 20128
 awerouter <PROFILE>                   # serve 的简写
 awerouter restore [providers|routing] # 从 .bak 备份恢复配置文件
 awerouter config path                 # 打印两个配置文件路径

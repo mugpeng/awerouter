@@ -296,22 +296,47 @@ class TestUsage:
         assert r.exit_code != 0
         assert (tmp_path / "logs" / "requests.jsonl").exists()
 
-    def test_since_window_on_group(self, tmp_path, monkeypatch):
+    def test_since_window_on_subcommand(self, tmp_path, monkeypatch):
         _setup(tmp_path, monkeypatch, _providers(), _routing())
         self._seed_log(tmp_path, monkeypatch)
-        r = CliRunner().invoke(cli, ["usage", "--since", "today", "stats"])
+        r = CliRunner().invoke(cli, ["usage", "stats", "--since", "today"])
         assert r.exit_code == 0, r.output
         # entry ts is 2026-08-16 UTC midnight; depending on local tz it may fall
         # inside or before today's window — either way the window line prints
         assert "window" in r.output
 
-    def test_group_options_reach_subcommand(self, tmp_path, monkeypatch):
+    def test_group_rejects_window_options(self, tmp_path, monkeypatch):
+        """--since/--profile moved off the group onto the subcommands."""
+        _setup(tmp_path, monkeypatch, _providers(), _routing())
+        r = CliRunner().invoke(cli, ["usage", "--since", "today", "stats"])
+        assert r.exit_code != 0
+        assert "No such option" in r.output
+
+    def test_window_options_on_savings(self, tmp_path, monkeypatch):
         _setup(tmp_path, monkeypatch, _providers(), _routing())
         self._seed_log(tmp_path, monkeypatch)
-        r = CliRunner().invoke(cli, ["usage", "--since", "today", "savings"])
+        r = CliRunner().invoke(cli, ["usage", "savings", "--since", "today"])
         assert r.exit_code == 0, r.output
         assert "window" in r.output
         assert "requests:" in r.output
+
+    def test_profile_filter_on_log(self, tmp_path, monkeypatch):
+        _setup(tmp_path, monkeypatch, _providers(), _routing())
+        self._seed_log(tmp_path, monkeypatch)
+        r = CliRunner().invoke(cli, ["usage", "log", "--profile", "cc-1"])
+        assert r.exit_code == 0, r.output
+        assert "claude-code" in r.output
+        r2 = CliRunner().invoke(cli, ["usage", "log", "--profile", "other"])
+        assert r2.exit_code == 0, r2.output
+        assert "(no logs yet)" in r2.output
+
+    def test_clean_has_no_window_options(self, tmp_path, monkeypatch):
+        """clean deletes everything; a window filter on it would be misleading."""
+        _setup(tmp_path, monkeypatch, _providers(), _routing())
+        self._seed_log(tmp_path, monkeypatch)
+        r = CliRunner().invoke(cli, ["usage", "clean", "--since", "today"])
+        assert r.exit_code != 0
+        assert (tmp_path / "logs" / "requests.jsonl").exists()
 
     def test_calibrate_subcommand(self, tmp_path, monkeypatch):
         _setup(tmp_path, monkeypatch, _providers(), _routing())
@@ -321,7 +346,7 @@ class TestUsage:
 
     def test_bad_since_errors(self, tmp_path, monkeypatch):
         _setup(tmp_path, monkeypatch, _providers(), _routing())
-        r = CliRunner().invoke(cli, ["usage", "--since", "blah"])
+        r = CliRunner().invoke(cli, ["usage", "stats", "--since", "blah"])
         assert r.exit_code != 0
 
 
@@ -453,4 +478,4 @@ class TestCommandSuggestions:
         monkeypatch.setattr("awerouter.cli._run_serve", lambda p, port, host: calls.append((p, port, host)))
         r = CliRunner().invoke(cli, ["cc-2"])
         assert r.exit_code == 0, r.output
-        assert calls == [("cc-2", 20128, "127.0.0.1")]
+        assert calls == [("cc-2", None, "127.0.0.1")]  # None = resolve in _run_serve

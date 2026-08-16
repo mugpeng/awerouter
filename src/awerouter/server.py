@@ -486,6 +486,7 @@ async def _serve(host: str, port: int, providers: dict, profile, settings,
         # not silently move: clients hardcode it. Only the implicit default
         # falls back to a random free port.
         if port_explicit:
+            await runner.cleanup()
             die(
                 f"port {port} is already in use — another awerouter (or process) is holding it.\n"
                 f"  stop it first, or launch with a different --port"

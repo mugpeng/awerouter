@@ -275,41 +275,39 @@ def _window_cutoff(since, profile_name):
     return cutoff
 
 
+# Window options live on the subcommands that consume them (log/stats/calibrate/
+# savings); `clean` deletes the whole log and takes none.
+_since_opt = click.option("--since", default=None,
+                          help="Count entries from this point on: 'today', 'yesterday', Nd (e.g. 7d), or YYYY-MM-DD.")
+_profile_opt = click.option("--profile", "profile_name", default=None,
+                            help="Count entries for one routing profile only.")
+
+
 @cli.group(cls=SuggestGroup)
-@click.option("--since", default=None,
-              help="Count entries from this point on: 'today', 'yesterday', Nd (e.g. 7d), or YYYY-MM-DD.")
-@click.option("--profile", "profile_name", default=None, help="Count entries for one routing profile only.")
-@click.pass_context
-def usage(ctx, since, profile_name):
-    """Usage analytics over the request log.
-
-    Window options sit between `usage` and the subcommand, e.g.:
-
-    awerouter usage --since today savings
-    """
-    ctx.ensure_object(dict)
-    ctx.obj["since"] = since
-    ctx.obj["profile"] = profile_name
+def usage():
+    """Usage analytics over the request log."""
 
 
 @usage.command()
+@_since_opt
+@_profile_opt
 @click.option("--lines", default=20, show_default=True, help="Number of trailing entries to show.")
 @click.option("--all", "show_all", is_flag=True, default=False,
               help="Show every entry instead of the last --lines.")
-@click.pass_context
-def log(ctx, lines: int, show_all: bool):
+def log(lines: int, show_all: bool, since, profile_name):
     """Show request log entries verbatim (last 20, or --all).
 
     Last --lines by default; --all shows every entry.
     """
-    _usage_log(None if show_all else lines, ctx.obj["since"], ctx.obj["profile"])
+    _usage_log(None if show_all else lines, since, profile_name)
 
 
 @usage.command()
-@click.pass_context
-def stats(ctx):
+@_since_opt
+@_profile_opt
+def stats(since, profile_name):
     """Routing summary, grouped by profile."""
-    _usage_stats(ctx.obj["since"], ctx.obj["profile"])
+    _usage_stats(since, profile_name)
 
 
 @usage.command()
@@ -370,16 +368,17 @@ def _usage_stats(since, profile_name):
 
 
 @usage.command()
-@click.pass_context
-def calibrate(ctx):
+@_since_opt
+@_profile_opt
+def calibrate(since, profile_name):
     """Tune longContextThreshold from the L3 token distribution.
 
     Only L3 traffic (default/longContext/image labels) is threshold-sensitive;
     L1 (webSearch) and L2 (background/think) route identically regardless.
     """
     from awerouter.logging import token_distribution
-    cutoff = _window_cutoff(ctx.obj["since"], ctx.obj["profile"])
-    d = token_distribution(cutoff, ctx.obj["profile"])
+    cutoff = _window_cutoff(since, profile_name)
+    d = token_distribution(cutoff, profile_name)
     if not d:
         click.echo("(no L3 traffic yet — run some non-background/think requests first)")
         return
@@ -400,10 +399,11 @@ _CACHE_WRITE_FACTOR = 1.25
 
 
 @usage.command()
-@click.pass_context
-def savings(ctx):
+@_since_opt
+@_profile_opt
+def savings(since, profile_name):
     """Token accounting vs a pro-only setup (token view, no prices)."""
-    _usage_savings(ctx.obj["since"], ctx.obj["profile"])
+    _usage_savings(since, profile_name)
 
 
 def _usage_savings(since, profile_name):

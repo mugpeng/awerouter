@@ -585,10 +585,16 @@ class TestServePortConflict:
     def test_implicit_port_conflict_falls_back(self, capsys):
         s, port = self._occupied_port()
         try:
-            with pytest.raises(asyncio.TimeoutError):
-                asyncio.run(asyncio.wait_for(
-                    _serve("127.0.0.1", port, _providers(0), ROUTING, SETTINGS),
-                    timeout=1.0))
+            async def t():
+                # _serve swallows CancelledError (graceful shutdown), so cancel
+                # explicitly after it has had time to bind and print.
+                task = asyncio.ensure_future(
+                    _serve("127.0.0.1", port, _providers(0), ROUTING, SETTINGS))
+                await asyncio.sleep(0.5)
+                task.cancel()
+                await task
+
+            asyncio.run(t())
             out = capsys.readouterr().out
             assert "listening on" in out
             assert f"listening on 127.0.0.1:{port}" not in out  # moved off the busy port
