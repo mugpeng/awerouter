@@ -75,7 +75,7 @@ The agent will install the CLI, init config, help you add profiles, and install 
 > "Tune longContextThreshold from my usage."
 > "Explain my usage savings."
 
-The agent can run read-only commands (`list`, `config show`, `usage stats`, `usage calibrate`, `usage savings`) and edit config directly, but it will **not** run `awerouter serve` — that would start a long-lived daemon inside the agent. To start the daemon, run it in your own terminal:
+The agent can run read-only commands (`list`, `config show`, `usage stats`, `usage calibrate`, `usage savings`) and edit config directly, but it will **not** run `awerouter serve` (long-lived daemon), `awerouter add` (interactive wizard), `awerouter restore` (overwrites config), or `awerouter usage clean` (deletes logs). To start the daemon, run it in your own terminal:
 
 ```bash
 awerouter serve cc-router-1
@@ -203,13 +203,17 @@ CC's `/model` picker sets the tier model id (c1/flash / c1/pro / c1/think). awer
 ## Commands
 
 ```bash
-awerouter init                        # create default config (= config init)
-awerouter add                         # interactively add a profile (and new providers)
+awerouter init                        # create default config from templates
+awerouter add                         # interactively add a profile (pick category and providers)
 awerouter list                        # list profiles (name, protocol, flash, pro, threshold)
 awerouter serve [PROFILE] [--port 20128] [--host 127.0.0.1]
 awerouter <PROFILE>                   # shorthand for serve PROFILE
-awerouter config path | show | edit | init
-awerouter usage stats [--clean]
+awerouter restore [providers|routing] # restore a config file from its .bak backup
+awerouter config path                 # print both config file paths
+awerouter config show [PROFILE]       # redacted config; PROFILE = its providers + entry only
+awerouter config edit [providers|routing]  # open one file in $EDITOR (backs up to .bak first)
+awerouter usage stats
+awerouter usage clean                 # delete saved request logs (asks to confirm)
 awerouter usage log [--lines 20] [--all]
 awerouter usage calibrate
 awerouter usage savings
@@ -217,7 +221,9 @@ awerouter usage savings
 
 All `usage` subcommands read the same request log; window options sit between `usage` and the subcommand (`awerouter usage --since today savings`).
 
-`usage stats` aggregates the log per profile: label/destination/provider/model breakdowns with percentages, error and fallback counts, latency percentiles (first byte and total) per destination/provider/model, and estimated message tokens. `--since` accepts `today`, `yesterday`, `7d`, or `YYYY-MM-DD` (local time); `--profile` restricts to one profile; `--clean` deletes the saved logs after a confirmation prompt. `usage log` shows entries verbatim — the last 20 by default, or every entry with `--all`.
+`usage stats` aggregates the log per profile: label/destination/provider/model breakdowns with percentages, error and fallback counts, latency percentiles (first byte and total) per destination/provider/model, and estimated message tokens. `--since` accepts `today`, `yesterday`, `7d`, or `YYYY-MM-DD` (local time); `--profile` restricts to one profile. `usage clean` deletes the saved logs (`requests.jsonl` + rotated backup) after a confirmation prompt. `usage log` shows entries verbatim — the last 20 by default, or every entry with `--all`.
+
+`config edit` and the `add` wizard snapshot the target file to `<name>.json.bak` before every write; `awerouter restore [providers|routing]` copies a backup back (with confirmation, then validates the restored config). `config path` prints the two config file paths; `config show [PROFILE]` shows the redacted full config, or just one profile's providers and routing entry.
 
 `usage calibrate` shows the message-token distribution of L3 traffic (the threshold-sensitive layer; messages only — system prompt and tools are excluded) and suggests candidate `longContextThreshold` values at p90/p95/p99. Run it after some real traffic, then edit `routing.json`.
 

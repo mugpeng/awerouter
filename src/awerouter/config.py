@@ -57,6 +57,20 @@ def routing_path() -> Path:
     return config_dir() / "routing.json"
 
 
+def backup_path(p: Path) -> Path:
+    """Single-slot .bak sibling of a config file (aweswitch convention)."""
+    return p.with_name(p.name + ".bak")
+
+
+def backup_file(p: Path) -> "Path | None":
+    """Snapshot p to its .bak before an awerouter-mediated write."""
+    if not p.exists():
+        return None
+    bak = backup_path(p)
+    shutil.copy2(p, bak)
+    return bak
+
+
 # ---------------------------------------------------------------------------
 # Value helpers (mirror aweswitch exactly)
 # ---------------------------------------------------------------------------
@@ -101,7 +115,7 @@ def redact(data):
 
 def _load_json(path: Path, label: str) -> dict:
     if not path.exists():
-        die(f"{label} not found: {path}\nrun: awerouter config init")
+        die(f"{label} not found: {path}\nrun: awerouter init")
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
@@ -287,6 +301,7 @@ def save_provider(protocol: str, name: str, base_url: str, auth: str) -> None:
     if name in group:
         die(f"provider already exists: {protocol}.{name}")
     group[name] = {"base_url": base_url, "auth": auth}
+    backup_file(path)
     path.write_text(json.dumps(data, indent=2) + "\n")
 
 
@@ -303,6 +318,7 @@ def save_profile_entry(
         "longContextThreshold": long_context_threshold,
         "destinations": {"flash": flash, "pro": pro},
     }
+    backup_file(path)
     path.write_text(json.dumps(data, indent=2) + "\n")
 
 
@@ -450,53 +466,67 @@ def config():
 
 @config.command("path")
 def config_path_cmd():
-    """Print config directory path."""
-    click.echo(config_dir())
+    """Print both config file paths."""
+    click.echo(providers_path())
+    click.echo(routing_path())
 
 
 @config.command("show")
-def config_show_cmd():
-    """Show config (secrets redacted)."""
+@click.argument("profile", required=False)
+def config_show_cmd(profile):
+    """Show config, secrets redacted; with PROFILE, only its view."""
     providers_all = load_providers()
     settings, profiles = load_routing()
     validate_profiles(providers_all, profiles)
-    click.echo("providers.json:" )
-    click.echo(format_providers_display(providers_all))
+    if not profile:
+        click.echo("providers.json:")
+        click.echo(format_providers_display(providers_all))
+        click.echo()
+        click.echo("routing.json:")
+        click.echo(format_routing_display(settings, profiles))
+        return
+    if profile not in profiles:
+        avail = ", ".join(profiles) or "(none)"
+        die(f"profile '{profile}' not found in routing.json; available: {avail}")
+    p = profiles[profile]
+    used = {d.provider_name: providers_all[p.protocol][d.provider_name]
+            for d in p.destinations.values()}
+    click.echo("providers:")
+    click.echo(format_providers_display({p.protocol: used}))
     click.echo()
-    click.echo("routing.json:")
-    click.echo(format_routing_display(settings, profiles))
+    click.echo("profile:")
+    click.echo(format_routing_display(settings, {profile: p}))
 
 
 @config.command("edit")
-def config_edit_cmd():
-    """Open config dir in $EDITOR (creates default config if missing)."""
-    d = config_dir()
-    d.mkdir(parents=True, exist_ok=True)
+@click.argument("file", required=False,
+                type=click.Choice(["providers", "routing"], case_sensitive=False))
+def config_edit_cmd(file):
+    """Open providers.json or routing.json in $EDITOR (default config created if missing)."""
+    config_dir().mkdir(parents=True, exist_ok=True)
     if not providers_path().exists() or not routing_path().exists():
         init_config()
+    if file is None:
+        file = click.prompt("File to edit", type=click.Choice(["providers", "routing"]))
+    target = providers_path() if file == "providers" else routing_path()
+    backup = backup_file(target)
+    if backup:
+        click.echo(f"backup: {backup}")
     editor = os.environ.get("VISUAL") or os.environ.get("EDITOR") or shutil.which("nano")
     if not editor:
         die("no EDITOR set; edit config manually")
     import subprocess
     import sys
     if os.name == "nt":
-        argv = [editor, str(d)]
-        result = subprocess.run(argv)
+        result = subprocess.run([editor, str(target)])
         sys.exit(result.returncode)
     else:
-        os.execvp(editor, [editor, str(d)])
-
-
-@config.command("init")
-def config_init_cmd():
-    """Create default config from templates."""
-    init_config()
-    click.echo(config_dir())
+        os.execvp(editor, [editor, str(target)])
 
 
 @cli.command("init")
 def init_cmd():
-    """Create default config from templates (same as config init)."""
+    """Create default config from templates."""
     init_config()
     click.echo(config_dir())
 

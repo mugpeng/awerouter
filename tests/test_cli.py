@@ -108,11 +108,12 @@ class TestAdd:
         answers = "\n".join([
             "cc-3",                    # profile name
             "",                        # protocol (default anthropic)
-            "newprov",                 # flash provider (new)
+            "<new>",                   # flash provider → create one
+            "newprov",                 #   provider name
             "https://api.newprov.com",  #   base_url
             "NEWPROV_KEY",             #   auth env var
             "nv-flash",                #   flash model
-            "anthropic",               # pro provider (existing)
+            "anthropic",               # pro provider (existing, from the choice list)
             "opus-9",                  #   pro model
             "",                        # threshold (default 8000)
         ]) + "\n"
@@ -130,14 +131,33 @@ class TestAdd:
         assert routing["cc-3"]["destinations"]["flash"] == "newprov,nv-flash"
         assert routing["cc-3"]["destinations"]["pro"] == "anthropic,opus-9"
 
+        # writes are preceded by a .bak snapshot
+        assert json.loads((tmp_path / "routing.json.bak").read_text()) == _routing()
+
         # the wizard result must actually serve
         _, profile, _ = load_for_profile("cc-3")
         assert profile.destinations["pro"].model == "opus-9"
 
+    def test_wizard_shows_category_overview(self, tmp_path, monkeypatch):
+        _setup(tmp_path, monkeypatch, _providers(), _routing())
+        answers = "\n".join([
+            "cc-3", "", "stepfun", "sf-flash", "anthropic", "opus-9", "",
+        ]) + "\n"
+        r = CliRunner().invoke(cli, ["add"], input=answers)
+        assert r.exit_code == 0, r.output
+        assert "providers.json categories:" in r.output
+        assert "anthropic          anthropic, stepfun" in r.output
+        assert "openai-chat        (empty)" in r.output
+
     def test_wizard_auto_inits_missing_config(self, tmp_path, monkeypatch):
         _setup(tmp_path, monkeypatch)  # no config files
         answers = "\n".join([
-            "cc-1", "", "newprov", "https://x", "K", "m1", "newprov", "m2", "",
+            "cc-1",                    # profile name
+            "",                        # protocol (default anthropic; template has providers)
+            "<new>",                   # flash provider → create one
+            "newprov", "https://x", "K", "m1",
+            "newprov",                 # pro provider (now in the choice list)
+            "m2", "",
         ]) + "\n"
         r = CliRunner().invoke(cli, ["add"], input=answers)
         assert r.exit_code == 0, r.output
@@ -198,7 +218,7 @@ class TestUsage:
     def test_clean_confirmed_removes_log(self, tmp_path, monkeypatch):
         _setup(tmp_path, monkeypatch, _providers(), _routing())
         self._seed_log(tmp_path, monkeypatch)
-        r = CliRunner().invoke(cli, ["usage", "stats", "--clean"], input="y\n")
+        r = CliRunner().invoke(cli, ["usage", "clean"], input="y\n")
         assert r.exit_code == 0, r.output
         assert "removed" in r.output
         assert not (tmp_path / "logs" / "requests.jsonl").exists()
@@ -206,9 +226,17 @@ class TestUsage:
     def test_clean_declined_keeps_log(self, tmp_path, monkeypatch):
         _setup(tmp_path, monkeypatch, _providers(), _routing())
         self._seed_log(tmp_path, monkeypatch)
-        r = CliRunner().invoke(cli, ["usage", "stats", "--clean"], input="n\n")
+        r = CliRunner().invoke(cli, ["usage", "clean"], input="n\n")
         assert r.exit_code == 0, r.output
         assert "aborted" in r.output
+        assert (tmp_path / "logs" / "requests.jsonl").exists()
+
+    def test_stats_has_no_clean_flag(self, tmp_path, monkeypatch):
+        """stats is read-only; deleting logs lives in `usage clean`."""
+        _setup(tmp_path, monkeypatch, _providers(), _routing())
+        self._seed_log(tmp_path, monkeypatch)
+        r = CliRunner().invoke(cli, ["usage", "stats", "--clean"])
+        assert r.exit_code != 0
         assert (tmp_path / "logs" / "requests.jsonl").exists()
 
     def test_since_window_on_group(self, tmp_path, monkeypatch):
@@ -257,6 +285,74 @@ class TestBareProfileLaunch:
         r = CliRunner().invoke(cli, ["list"])
         assert r.exit_code == 0
         assert calls == []  # list ran, serve never did
+
+
+class TestConfigCommands:
+    def test_path_prints_both_files(self, tmp_path, monkeypatch):
+        _setup(tmp_path, monkeypatch, _providers(), _routing())
+        r = CliRunner().invoke(cli, ["config", "path"])
+        assert r.exit_code == 0, r.output
+        assert r.output.splitlines() == [
+            str(tmp_path / "providers.json"),
+            str(tmp_path / "routing.json"),
+        ]
+
+    def test_show_full_config(self, tmp_path, monkeypatch):
+        _setup(tmp_path, monkeypatch, _providers(), _routing())
+        r = CliRunner().invoke(cli, ["config", "show"])
+        assert r.exit_code == 0, r.output
+        assert "providers.json:" in r.output
+        assert "routing.json:" in r.output
+        assert "${K1}" in r.output  # env-ref auth shown
+
+    def test_show_single_profile(self, tmp_path, monkeypatch):
+        _setup(tmp_path, monkeypatch, _providers(), _routing())
+        r = CliRunner().invoke(cli, ["config", "show", "cc-1"])
+        assert r.exit_code == 0, r.output
+        assert "providers:" in r.output
+        assert "profile:" in r.output
+        assert "cc-1" in r.output
+        assert "cc-2" not in r.output  # other profiles excluded
+        assert "stepfun" in r.output   # only providers this profile uses
+
+    def test_show_unknown_profile_dies(self, tmp_path, monkeypatch):
+        _setup(tmp_path, monkeypatch, _providers(), _routing())
+        r = CliRunner().invoke(cli, ["config", "show", "nope"])
+        assert r.exit_code != 0
+        assert "not found" in r.output
+
+    def test_init_removed_from_config_group(self, tmp_path, monkeypatch):
+        _setup(tmp_path, monkeypatch)
+        r = CliRunner().invoke(cli, ["config", "init"])
+        assert r.exit_code != 0
+        assert "did you mean" in r.output or "-h" in r.output
+
+
+class TestRestore:
+    def test_restores_routing_from_bak(self, tmp_path, monkeypatch):
+        _setup(tmp_path, monkeypatch, _providers(), _routing())
+        # simulate a bad edit, with the add wizard's backup still around
+        (tmp_path / "routing.json.bak").write_text(json.dumps(_routing()))
+        (tmp_path / "routing.json").write_text(json.dumps({"settings": {}}))
+        r = CliRunner().invoke(cli, ["restore", "routing"], input="y\n")
+        assert r.exit_code == 0, r.output
+        assert "config ok" in r.output
+        assert json.loads((tmp_path / "routing.json").read_text()) == _routing()
+
+    def test_declined_keeps_file(self, tmp_path, monkeypatch):
+        _setup(tmp_path, monkeypatch, _providers(), _routing())
+        (tmp_path / "routing.json.bak").write_text(json.dumps(_routing()))
+        (tmp_path / "routing.json").write_text(json.dumps({"settings": {}}))
+        r = CliRunner().invoke(cli, ["restore", "routing"], input="n\n")
+        assert r.exit_code == 0, r.output
+        assert "aborted" in r.output
+        assert json.loads((tmp_path / "routing.json").read_text()) == {"settings": {}}
+
+    def test_no_backup_dies(self, tmp_path, monkeypatch):
+        _setup(tmp_path, monkeypatch, _providers(), _routing())
+        r = CliRunner().invoke(cli, ["restore", "providers"], input="y\n")
+        assert r.exit_code != 0
+        assert "no backup found" in r.output
 
 
 class TestCommandSuggestions:

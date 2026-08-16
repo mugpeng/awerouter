@@ -4,11 +4,13 @@ Imports the click group from config.py and extends it.
 """
 
 import asyncio
+import shutil
 
 import click
 
 from awerouter.config import (
     SuggestGroup,
+    backup_path,
     cli as config_cli,
     config_dir,
     die,
@@ -66,6 +68,9 @@ def _serve_profile(ctx, port: int, host: str):
 cli.add_command(_serve_profile)
 
 
+_NEW_PROVIDER = "<new>"
+
+
 @cli.command("add")
 def add():
     """Interactively add a routing profile (creates any new providers)."""
@@ -78,13 +83,24 @@ def add():
     name = click.prompt("Profile name")
     if name in profiles:
         die(f"profile already exists: {name}")
-    protocol = click.prompt("Protocol", type=click.Choice(PROTOCOL_IDS), default="anthropic")
+
+    click.echo("providers.json categories:")
+    for pid in PROTOCOL_IDS:
+        names = ", ".join(sorted(providers_all.get(pid, {}))) or "(empty)"
+        click.echo(f"  {pid:18s} {names}")
+    protocol = click.prompt("Protocol (providers.json category)",
+                            type=click.Choice(PROTOCOL_IDS), default="anthropic")
     known = set(providers_all.get(protocol, {}))
 
     def ask_tier(tier: str) -> str:
-        hint = ", ".join(sorted(known)) or "none yet"
-        pname = click.prompt(f"{tier} provider ({hint})")
-        if pname not in known:
+        pname = None
+        if known:
+            choices = sorted(known) + [_NEW_PROVIDER]
+            picked = click.prompt(f"{tier} provider", type=click.Choice(choices))
+            if picked != _NEW_PROVIDER:
+                pname = picked
+        if pname is None:
+            pname = click.prompt("  new provider name")
             base_url = click.prompt(f"  {pname} base_url")
             auth_var = click.prompt(f"  {pname} auth env var name (stored as ${{VAR}})")
             save_provider(protocol, pname, base_url, f"${{{auth_var}}}")
@@ -116,6 +132,29 @@ def list_profiles():
             f"{name}\t{p.protocol}\t{flash.provider_name}/{flash.model}"
             f"\t{pro.provider_name}/{pro.model}\tL3>{p.long_context_threshold}"
         )
+
+
+@cli.command("restore")
+@click.argument("file", required=False,
+                type=click.Choice(["providers", "routing"], case_sensitive=False))
+def restore_cmd(file):
+    """Restore a config file from its .bak backup (providers | routing).
+
+    Backups are written by `config edit` and the `add` wizard before each write.
+    """
+    if file is None:
+        file = click.prompt("File to restore", type=click.Choice(["providers", "routing"]))
+    target = providers_path() if file == "providers" else routing_path()
+    bak = backup_path(target)
+    if not bak.exists():
+        die(f"no backup found: {bak}")
+    if not click.confirm(f"Restore {target} from {bak.name}? (overwrites the current file)"):
+        click.echo("aborted")
+        return
+    shutil.copy2(bak, target)
+    click.echo(f"restored {target}")
+    validate_profiles(load_providers(), load_routing()[1])
+    click.echo("config ok")
 
 
 def _passes_log(entry, cutoff, profile_name) -> bool:
@@ -248,22 +287,24 @@ def log(ctx, lines: int, show_all: bool):
 
 
 @usage.command()
-@click.option("--clean", is_flag=True, default=False,
-              help="Delete saved request logs (asks for confirmation).")
 @click.pass_context
-def stats(ctx, clean):
+def stats(ctx):
     """Routing summary, grouped by profile."""
-    from awerouter.logging import clear_logs
-    if clean:
-        if click.confirm("Delete all saved request logs (requests.jsonl + rotated backup)?"):
-            removed = clear_logs()
-            for p in removed:
-                click.echo(f"removed {p}")
-            if not removed:
-                click.echo("(no logs to remove)")
-            return
-        click.echo("aborted — showing stats instead")
     _usage_stats(ctx.obj["since"], ctx.obj["profile"])
+
+
+@usage.command()
+def clean():
+    """Delete saved request logs (requests.jsonl + rotated backup)."""
+    from awerouter.logging import clear_logs
+    if click.confirm("Delete all saved request logs (requests.jsonl + rotated backup)?"):
+        removed = clear_logs()
+        for p in removed:
+            click.echo(f"removed {p}")
+        if not removed:
+            click.echo("(no logs to remove)")
+    else:
+        click.echo("aborted")
 
 
 def _usage_stats(since, profile_name):

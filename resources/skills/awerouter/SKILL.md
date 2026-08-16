@@ -33,7 +33,7 @@ Main config files:
 You may run these read-only or non-interactive commands:
 - `awerouter init`
 - `awerouter config path`
-- `awerouter config show`
+- `awerouter config show [PROFILE]`
 - `awerouter config edit`
 - `awerouter list`
 - `awerouter usage stats`
@@ -42,8 +42,10 @@ You may run these read-only or non-interactive commands:
 - `awerouter usage savings`
 
 Do not run these inside the agent:
-- `awerouter serve`
-- `awerouter add`
+- `awerouter serve` (blocks the session)
+- `awerouter add` (interactive wizard)
+- `awerouter restore` (overwrites a config file from its `.bak`)
+- `awerouter usage clean` (deletes saved request logs)
 
 ## Config Structure
 
@@ -127,7 +129,8 @@ This creates template `providers.json` and `routing.json` if missing.
 Run:
 ```bash
 awerouter config path
-awerouter config show
+awerouter config show            # everything, secrets redacted
+awerouter config show <profile>  # just that profile: its providers + routing entry
 awerouter list
 ```
 
@@ -175,3 +178,4 @@ Explain the output plainly; do not promise exact billing because output tokens a
 - Profile not found -> check `routing.json` profile id spelling and `AWEROUTER_CONFIG_DIR`.
 - Provider not found -> check protocol group name and provider spelling in `providers.json`.
 - Missing token env var -> set the shell variable before starting `awerouter serve`.
+- Config broken after an edit -> `config edit` and the `add` wizard write a `.bak` before every change; tell the user to run `awerouter restore [providers|routing]` in their own terminal.

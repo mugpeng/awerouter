@@ -75,7 +75,7 @@ Agent 会安装 CLI、初始化配置、帮你添加 profile，并通过 [aweski
 > "根据 usage 帮我调一下 longContextThreshold。"
 > "解释一下我的 usage savings。"
 
-Agent 可以直接运行只读命令（`list`、`config show`、`usage stats`、`usage calibrate`、`usage savings`）并编辑配置，但**不会**运行 `awerouter serve` —— 那会在 agent 内部启动一个常驻 daemon。要启动 daemon，请在你自己的终端运行：
+Agent 可以直接运行只读命令（`list`、`config show`、`usage stats`、`usage calibrate`、`usage savings`）并编辑配置，但**不会**运行 `awerouter serve`（常驻 daemon）、`awerouter add`（交互式向导）、`awerouter restore`（覆盖配置文件）或 `awerouter usage clean`（删除日志）。要启动 daemon，请在你自己的终端运行：
 
 ```bash
 awerouter serve cc-router-1
@@ -203,13 +203,17 @@ CC 的 `/model` 选择器设置 tier model id（c1/flash / c1/pro / c1/think）�
 ## 命令
 
 ```bash
-awerouter init                        # 创建默认配置（= config init）
-awerouter add                         # 交互式添加 profile（含新 provider）
+awerouter init                        # 从模板创建默认配置
+awerouter add                         # 交互式添加 profile（先选类别再选 provider）
 awerouter list                        # 列出 profile（名字、协议、flash、pro、阈值）
 awerouter serve [PROFILE] [--port 20128] [--host 127.0.0.1]
 awerouter <PROFILE>                   # serve 的简写
-awerouter config path | show | edit | init
-awerouter usage stats [--clean]
+awerouter restore [providers|routing] # 从 .bak 备份恢复配置文件
+awerouter config path                 # 打印两个配置文件路径
+awerouter config show [PROFILE]       # 脱敏全量配置；带 PROFILE 只看它的 provider 和条目
+awerouter config edit [providers|routing]  # 在 $EDITOR 中打开某个文件（先备份 .bak）
+awerouter usage stats
+awerouter usage clean                 # 删除已保存的请求日志（需确认）
 awerouter usage log [--lines 20] [--all]
 awerouter usage calibrate
 awerouter usage savings
@@ -217,7 +221,9 @@ awerouter usage savings
 
 所有 `usage` 子命令读的是同一份请求日志；窗口选项放在 `usage` 和子命令之间（`awerouter usage --since today savings`）。
 
-`usage stats` 按 profile 汇总：label/destination/provider/model 分组（带百分比）、错误与降级计数、各 destination/provider/model 的延迟分位数（首字节与总时长）、估算 message tokens。`--since` 接受 `today`、`yesterday`、`7d` 或 `YYYY-MM-DD`（本地时间）；`--profile` 只看单个 profile；`--clean` 确认后删除已保存的日志。`usage log` 原样显示条目——默认最后 20 条，加 `--all` 显示全部。
+`usage stats` 按 profile 汇总：label/destination/provider/model 分组（带百分比）、错误与降级计数、各 destination/provider/model 的延迟分位数（首字节与总时长）、估算 message tokens。`--since` 接受 `today`、`yesterday`、`7d` 或 `YYYY-MM-DD`（本地时间）；`--profile` 只看单个 profile。`usage clean` 确认后删除已保存的日志（`requests.jsonl` 及轮转备份）。`usage log` 原样显示条目——默认最后 20 条，加 `--all` 显示全部。
+
+`config edit` 和 `add` 向导在每次写入前把目标文件快照为 `<名称>.json.bak`；`awerouter restore [providers|routing]` 确认后把备份拷回并校验恢复后的配置。`config path` 打印两个配置文件路径；`config show [PROFILE]` 显示脱敏全量配置，或单个 profile 用到的 provider 与路由条目。
 
 `usage calibrate` 展示 L3 流量（受阈值影响的层）的消息 token 分布（仅统计 messages，不含 system prompt 与 tools 定义），并在 p90/p95/p99 处建议 `longContextThreshold` 候选值。跑一段真实流量后执行，再编辑 `routing.json`。
 

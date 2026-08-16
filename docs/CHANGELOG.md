@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+- `config show [PROFILE]`: single-profile redacted view (the providers it uses + its routing entry); no argument keeps the full-config view.
+- `config path` prints both config file paths (`providers.json`, `routing.json`) instead of the config directory.
+- `config edit` opens `providers.json` or `routing.json` — the file is an optional argument (`providers` / `routing`) or an interactive choice — instead of opening the config directory; snapshots the file to `.bak` first.
+- `awerouter add` wizard: prints a `providers.json` category overview, and provider selection is a choice list over the category's existing providers (`<new>` adds one) instead of free text with a hint.
+- Removed `config init` (use top-level `awerouter init`); error hints updated to match.
+
+### Added
+- `awerouter restore [providers|routing]`: restore a config file from its `.bak` backup. Backups are single-slot (aweswitch convention) and written by `config edit` and the `add` wizard before every write.
+- `usage clean`: deletes saved request logs after a confirmation prompt — moved off `usage stats --clean` so `stats` stays read-only.
+
 ## v0.3.1 - 2026-08-16
 
 ### Changed
