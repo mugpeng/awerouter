@@ -342,8 +342,8 @@ class TestUsage:
         assert "msg=80" in r.output
         assert "sys=30" in r.output
         assert "tools=10" in r.output
-        # search token count nested inside results: results=20(20)
-        assert "results=20(20)" in r.output
+        # search token count nested inside results: results=20(search=20)
+        assert "results=20(search=20)" in r.output
         # header line
         assert "search discount: 30%" in r.output
         assert "search: 20" in r.output

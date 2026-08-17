@@ -71,9 +71,9 @@ def _is_file_search(name) -> bool:
 
 
 # Shell-exec tool names whose command text decides search-ness. Codex wraps
-# searches here instead of exposing per-purpose tools (0.147: exec_command;
-# older builds: shell); the command lives in arguments "cmd" as one compound
-# shell string, e.g. "echo ..; rg -n x . | sed ..; find . -name y".
+# searches here instead of exposing per-purpose tools (0.147: exec_command,
+# "cmd" string; older builds: shell, "command" as an argv array); commands
+# arrive as one compound shell string, e.g. "echo ..; rg -n x . | sed ..".
 _SHELL_TOOLS = frozenset({"exec_command", "shell"})
 _SEARCH_BINARIES = frozenset({"rg", "grep", "find", "fd", "fdfind", "ls", "ag", "ack"})
 
@@ -81,14 +81,14 @@ _SEARCH_BINARIES = frozenset({"rg", "grep", "find", "fd", "fdfind", "ls", "ag", 
 def _is_search_command(cmd) -> bool:
     """True if any segment of a compound shell command is a file search.
 
-    Segments split on ;/&&/||, each reduced to its pipeline head (text before
-    the first |) with leading FOO=bar env assignments stripped; any head whose
-    first word is a search binary qualifies — codex prefixes real work with
-    echo banners, so "first segment" would miss it.
+    Segments split on ;/&&/||/newlines, each reduced to its pipeline head
+    (text before the first |) with leading FOO=bar env assignments stripped;
+    any head whose first word is a search binary qualifies — codex prefixes
+    real work with echo banners, so "first segment" would miss it.
     """
     if not isinstance(cmd, str) or not cmd.strip():
         return False
-    for segment in re.split(r";|&&|\|\|", cmd):
+    for segment in re.split(r";|&&|\|\||\n", cmd):
         head = segment.split("|", 1)[0].strip()
         if not head:
             continue
@@ -115,7 +115,11 @@ def _shell_is_search(name, arguments) -> bool:
         return False
     if not isinstance(args, dict):
         return False
-    return _is_search_command(args.get("cmd") or args.get("command"))
+    cmd = args.get("cmd") or args.get("command")
+    if isinstance(cmd, list):
+        # argv form: the real command is one element, e.g. ["bash","-lc","rg x"]
+        return any(_is_search_command(part) for part in cmd if isinstance(part, str))
+    return _is_search_command(cmd)
 
 
 def effective_tokens(token_count: int, file_search_tokens: int, discount: float = 0.3) -> int:

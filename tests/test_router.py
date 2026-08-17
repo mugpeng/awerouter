@@ -416,6 +416,23 @@ class TestExtractOpenAIResponses:
         ]})
         assert r.file_search_tokens == 0
 
+    def test_shell_multiline_command_search_after_first_line(self):
+        r = extract("openai-responses", {"input": [
+            {"type": "function_call", "call_id": "c1", "name": "exec_command",
+             "arguments": json.dumps({"cmd": "cd /tmp\necho start\nrg -n needle ."})},
+            {"type": "function_call_output", "call_id": "c1", "output": "hits"},
+        ]})
+        assert r.file_search_tokens == estimate_tokens("hits")
+
+    def test_shell_argv_command_form_counted(self):
+        """older codex `shell` sends the command as an argv array."""
+        r = extract("openai-responses", {"input": [
+            {"type": "function_call", "call_id": "c1", "name": "shell",
+             "arguments": json.dumps({"command": ["bash", "-lc", "rg -n x ."]})},
+            {"type": "function_call_output", "call_id": "c1", "output": "hits"},
+        ]})
+        assert r.file_search_tokens == estimate_tokens("hits")
+
 
 def test_extract_unknown_protocol_raises():
     with pytest.raises(ValueError):

@@ -265,7 +265,7 @@ def _usage_log(n, since=None, profile_name=None, tokens_mode=False):
             for k, v in e.tokens.items():
                 short = _TOKEN_SHORT.get(k, k)
                 if k == "tool_results" and e.file_search_tokens:
-                    parts.append(f"{short}={v}({e.file_search_tokens})")
+                    parts.append(f"{short}={v}(search={e.file_search_tokens})")
                 else:
                     parts.append(f"{short}={v}")
             detail = " ".join(parts) or "-"
