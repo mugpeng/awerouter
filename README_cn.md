@@ -228,7 +228,7 @@ awerouter usage calibrate
 awerouter usage savings
 ```
 
-所有 `usage` 子命令读的是同一份请求日志；窗口选项放在 `usage` 和子命令之间（`awerouter usage --since today savings`）。
+所有 `usage` 子命令读的是同一份请求日志。`log`、`stats`、`tokens`、`calibrate` 和 `savings` 直接接受 `--since`（`today`、`yesterday`、`7d` 或 `YYYY-MM-DD`，本地时间）和 `--profile`——例如 `awerouter usage stats --since today --profile cc-1`；`clean` 删除全部日志，不接受窗口选项。
 
 `usage stats` 按 profile 汇总：label/destination/provider/model 分组（带百分比）、错误与降级计数、各 destination/provider/model 的延迟分位数（首字节与总时长）、估算请求 token（全部请求内容：messages、system prompt、工具定义与工具 I/O）。`--since` 接受 `today`、`yesterday`、`7d` 或 `YYYY-MM-DD`（本地时间）；`--profile` 只看单个 profile。`usage clean` 确认后删除已保存的日志（`requests.jsonl` 及轮转备份）。`usage log` 原样显示条目——默认最后 20 条，加 `--all` 显示全部；`--tokens` 把 status/延迟/入站 model 三列换成每条请求的分类型 token 明细（`msg/sys/tools/results/calls/think`），分类型计数之前记录的条目只显示总数。
 

@@ -228,7 +228,7 @@ awerouter usage calibrate [--since ..] [--profile ..]
 awerouter usage savings [--since ..] [--profile ..]
 ```
 
-All `usage` subcommands read the same request log. `log`, `stats`, `calibrate`, and `savings` take `--since` (`today`, `yesterday`, `7d`, or `YYYY-MM-DD`, local time) and `--profile` directly — e.g. `awerouter usage stats --since today --profile cc-1`; `clean` deletes everything and takes no window options.
+All `usage` subcommands read the same request log. `log`, `stats`, `tokens`, `calibrate`, and `savings` take `--since` (`today`, `yesterday`, `7d`, or `YYYY-MM-DD`, local time) and `--profile` directly — e.g. `awerouter usage stats --since today --profile cc-1`; `clean` deletes everything and takes no window options.
 
 `usage stats` aggregates the log per profile (with its wire protocol): label/agent/destination/provider/model breakdowns with percentages, error and fallback counts, latency percentiles (first byte and total) per destination/provider/model, and estimated request tokens (all request content: messages, system prompt, tools, tool I/O). `usage clean` deletes the saved logs (`requests.jsonl` + rotated backup) after a confirmation prompt. `usage log` shows entries verbatim — the last 20 by default, or every entry with `--all`; each line includes the protocol served and the calling agent, detected from the client's `User-Agent` header (`claude-cli/...` → `claude-code`, `codex_cli_rs/...` → `codex`, `opencode/...` → `opencode`). `--tokens` swaps the status/latency/model-in columns for the per-type token breakdown of each request (`msg/sys/tools/results/calls/think`); entries logged before per-type counting show only the total.
 
