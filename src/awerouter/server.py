@@ -140,6 +140,7 @@ def _resolve_for_request(body: dict, profile, settings) -> ResolveResult:
         settings.think_model,
         profile.long_context_threshold,
         settings.web_search_model,
+        settings.search_result_discount,
     )
 
 
@@ -173,6 +174,7 @@ def _log_failure(state: _RoutingState, request_id: str, t0: float, status: int) 
         bytes=0,
         token_count=state.result.inspect.token_count,
         tokens=state.result.inspect.token_breakdown,
+        file_search_tokens=state.result.inspect.file_search_tokens,
         profile=state.profile.name,
         protocol=state.profile.protocol,
         agent=state.agent,
@@ -298,6 +300,7 @@ async def _proxy_flow(request: web.Request, endpoint_protocol: str) -> web.Strea
             bytes=byte_count,
             token_count=state.result.inspect.token_count,
             tokens=state.result.inspect.token_breakdown,
+            file_search_tokens=state.result.inspect.file_search_tokens,
             profile=profile.name,
             protocol=profile.protocol,
             agent=state.agent,

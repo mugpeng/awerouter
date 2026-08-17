@@ -428,12 +428,17 @@ def calibrate(since, profile_name):
     """
     from awerouter.logging import token_distribution
     cutoff = _window_cutoff(since, profile_name)
-    d = token_distribution(cutoff, profile_name)
+    try:
+        discount = load_routing()[0].search_result_discount
+    except SystemExit:
+        discount = 0.3  # calibrate is a log view; routing.json missing → default
+    d = token_distribution(cutoff, profile_name, discount)
     if not d:
         click.echo("(no L3 traffic yet — run some non-background/think requests first)")
         return
     click.echo(f"L3 request-token distribution ({d['n']} requests):")
     click.echo("  (all request content: messages, system prompt, tool definitions, tool I/O)")
+    click.echo(f"  (file-search tool results weighed at {discount:.0%})")
     click.echo(f"  min: {d['min']:>7}   p50: {d['p50']:>7}   p75: {d['p75']:>7}")
     click.echo(f"  p90: {d['p90']:>7}   p95: {d['p95']:>7}   p99: {d['p99']:>7}   max: {d['max']:>7}")
     click.echo()

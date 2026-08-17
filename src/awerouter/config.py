@@ -190,10 +190,18 @@ def load_routing(path: Optional[Path] = None) -> tuple[Settings, dict[str, Routi
     raw_settings = data.pop("settings", {})
     if not isinstance(raw_settings, dict):
         die("routing.json 'settings' must be an object")
+    raw_discount = raw_settings.get("searchResultDiscount", 0.3)
+    try:
+        discount = float(raw_discount)
+    except (TypeError, ValueError):
+        die(f"routing.json settings 'searchResultDiscount' must be a number in [0, 1], got: {raw_discount!r}")
+    if not 0 <= discount <= 1:
+        die(f"routing.json settings 'searchResultDiscount' must be in [0, 1], got: {discount}")
     settings = Settings(
         background_model=str(raw_settings.get("backgroundModel", "flash")),
         think_model=str(raw_settings.get("thinkModel", "pro")),
         web_search_model=str(raw_settings.get("webSearchModel", "pro")),
+        search_result_discount=discount,
     )
 
     profiles: dict[str, RoutingProfile] = {}
@@ -357,6 +365,7 @@ def format_routing_display(settings: Settings, profiles: dict[str, RoutingProfil
             "backgroundModel": settings.background_model,
             "thinkModel": settings.think_model,
             "webSearchModel": settings.web_search_model,
+            "searchResultDiscount": settings.search_result_discount,
         },
     }
     for name, p in profiles.items():

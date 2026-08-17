@@ -28,6 +28,7 @@ class Settings:
     background_model: str = "flash"   # L2 tier-label for background → flash dest
     think_model: str = "pro"          # L2 tier-label for think → pro dest
     web_search_model: str = "pro"     # L1 web_search destination key
+    search_result_discount: float = 0.3  # L3 weight of file-search (Grep/Glob/LS) result tokens; 1 = off
 
 
 @dataclass
@@ -48,6 +49,9 @@ class InspectResult:
     # Per-content-type token estimate (system/messages/tools/tool_results/
     # tool_calls/thinking); sum equals token_count. Empty types omitted.
     token_breakdown: dict = field(default_factory=dict)
+    # Estimated tokens of tool results from file-search tools (Grep/Glob/LS);
+    # L3 weighs these against the threshold at settings.searchResultDiscount.
+    file_search_tokens: int = 0
 
 
 @dataclass
@@ -76,3 +80,4 @@ class RequestLog:
     protocol: str = ""                        # wire protocol served (anthropic / openai-chat / openai-responses)
     agent: str = ""                           # normalized client identity from the User-Agent header
     tokens: dict = field(default_factory=dict)  # per-type input-token breakdown; sum == token_count (pre-breakdown logs: empty)
+    file_search_tokens: int = 0                  # estimated tokens of file-search tool results (0 = none / legacy log)

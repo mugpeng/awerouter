@@ -199,6 +199,34 @@ class TestLoadRouting:
         assert settings.think_model == "strong"
         assert settings.web_search_model == "flash"
 
+    def test_settings_search_discount_default(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+        _write_config(tmp_path, {}, {
+            "cc-1": {"protocol": "anthropic", "longContextThreshold": 1,
+                     "destinations": {"flash": "p,m", "pro": "p,m"}},
+        })
+        assert load_routing()[0].search_result_discount == 0.3
+
+    def test_settings_search_discount_explicit(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+        _write_config(tmp_path, {}, {
+            "settings": {"searchResultDiscount": 0.5},
+            "cc-1": {"protocol": "anthropic", "longContextThreshold": 1,
+                     "destinations": {"flash": "p,m", "pro": "p,m"}},
+        })
+        assert load_routing()[0].search_result_discount == 0.5
+
+    @pytest.mark.parametrize("bad", ["fast", -0.1, 1.5])
+    def test_settings_search_discount_invalid_dies(self, tmp_path, monkeypatch, bad):
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+        _write_config(tmp_path, {}, {
+            "settings": {"searchResultDiscount": bad},
+            "cc-1": {"protocol": "anthropic", "longContextThreshold": 1,
+                     "destinations": {"flash": "p,m", "pro": "p,m"}},
+        })
+        with pytest.raises(SystemExit, match="searchResultDiscount"):
+            load_routing()
+
     def test_multiple_profiles(self, tmp_path, monkeypatch):
         monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
         _write_config(tmp_path, {}, {

@@ -23,3 +23,5 @@ dist/
 # providers.json / routing.json live in ~/.config/awerouter/, not in this repo.
 .zcode/plans/plan-sess_0fe0caaf-9941-4018-9e88-897bb24cb4f7.md
 /docs/todo/archive
+/docs/media/0817/awerouter-ask-your-agent-to-install-zh-CN
+.zcode/plans/plan-sess_bde9792e-da5e-49e6-adb4-2d8b7002e9d7.md

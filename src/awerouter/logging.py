@@ -7,6 +7,7 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 
+from awerouter.protocols import effective_tokens
 from awerouter.types import RequestLog
 
 # Anthropic-style prompt-cache TTL; gaps longer than this expire the prefix cache.
@@ -63,6 +64,7 @@ def append(log: RequestLog) -> None:
             "bytes": log.bytes,
             "token_count": log.token_count,
             "tokens": log.tokens,
+            "file_search_tokens": log.file_search_tokens,
             "protocol": log.protocol,
             "agent": log.agent,
         }, ensure_ascii=False) + "\n")
@@ -125,6 +127,7 @@ def tail(n: int | None = 20) -> list[RequestLog]:
                 bytes=data.get("bytes", 0),
                 token_count=data.get("token_count", 0),
                 tokens=data.get("tokens") or {},
+                file_search_tokens=data.get("file_search_tokens", 0),
                 protocol=data.get("protocol", ""),
                 agent=data.get("agent", ""),
             ))
@@ -431,11 +434,12 @@ def clear_logs() -> list:
 _L3_LABELS = frozenset({"default", "longContext", "image"})
 
 
-def token_distribution(since=None, profile=None) -> dict:
+def token_distribution(since=None, profile=None, discount: float = 0.3) -> dict:
     """Token distribution of L3 traffic for calibrating longContextThreshold.
 
     Only L3 requests (label in default/longContext/image) are threshold-sensitive;
-    L1/L2 route identically no matter where the threshold sits.
+    L1/L2 route identically no matter where the threshold sits. File-search
+    result tokens are weighed at `discount` — the same number L3 compares.
     """
     f = _log_file()
     if not f.exists():
@@ -452,7 +456,9 @@ def token_distribution(since=None, profile=None) -> dict:
             continue
         if data.get("label", "") not in _L3_LABELS:
             continue
-        tokens.append(data.get("token_count", 0))
+        tokens.append(effective_tokens(
+            data.get("token_count", 0), data.get("file_search_tokens", 0), discount
+        ))
     if not tokens:
         return {}
     tokens.sort()

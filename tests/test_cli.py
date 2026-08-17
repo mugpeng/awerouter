@@ -375,6 +375,15 @@ class TestUsage:
         self._seed_log(tmp_path, monkeypatch)
         r = CliRunner().invoke(cli, ["usage", "calibrate"])
         assert r.exit_code == 0, r.output
+        assert "file-search tool results weighed at 30%" in r.output
+
+    def test_calibrate_reflects_configured_discount(self, tmp_path, monkeypatch):
+        routing = {"settings": {"searchResultDiscount": 0.5}, **_routing()}
+        _setup(tmp_path, monkeypatch, _providers(), routing)
+        self._seed_log(tmp_path, monkeypatch)
+        r = CliRunner().invoke(cli, ["usage", "calibrate"])
+        assert r.exit_code == 0, r.output
+        assert "weighed at 50%" in r.output
 
     def test_bad_since_errors(self, tmp_path, monkeypatch):
         _setup(tmp_path, monkeypatch, _providers(), _routing())

@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from awerouter.protocols import estimate_tokens, extract
+from awerouter.protocols import effective_tokens, estimate_tokens, extract
 from awerouter.router import resolve
 from awerouter.types import Destination
 
@@ -16,8 +16,11 @@ def _cfg():
     }
 
 
-def _resolve(model, body, threshold=32000, web_search_model="pro"):
-    return resolve(model, extract("anthropic", body), _cfg(), "flash", "think", threshold, web_search_model)
+def _resolve(model, body, threshold=32000, web_search_model="pro", search_discount=0.3):
+    return resolve(
+        model, extract("anthropic", body), _cfg(), "flash", "think",
+        threshold, web_search_model, search_discount,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -140,6 +143,37 @@ class TestExtractAnthropic:
         assert set(r.token_breakdown) == {"system", "messages", "tools", "tool_results", "tool_calls", "thinking"}
         assert r.token_count == sum(r.token_breakdown.values())
 
+    def test_file_search_result_tokens(self):
+        r = extract("anthropic", {"messages": [
+            {"role": "assistant", "content": [
+                {"type": "tool_use", "id": "t1", "name": "Grep", "input": {"q": "x"}},
+            ]},
+            {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": "t1", "content": "match1\nmatch2\nmatch3"},
+            ]},
+        ]})
+        assert r.file_search_tokens == estimate_tokens("match1\nmatch2\nmatch3")
+
+    def test_non_search_tool_result_not_measured(self):
+        r = extract("anthropic", {"messages": [
+            {"role": "assistant", "content": [
+                {"type": "tool_use", "id": "t1", "name": "Read", "input": {"path": "x"}},
+            ]},
+            {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": "t1", "content": "file content"},
+            ]},
+        ]})
+        assert r.file_search_tokens == 0
+
+    def test_orphan_tool_result_not_measured(self):
+        """tool_use missing (compacted history) -> counts as non-search."""
+        r = extract("anthropic", {"messages": [
+            {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": "gone", "content": "match1"},
+            ]},
+        ]})
+        assert r.file_search_tokens == 0
+
 
 # ---------------------------------------------------------------------------
 # openai-chat extraction
@@ -196,6 +230,24 @@ class TestExtractOpenAIChat:
     def test_tool_result_content_counted(self):
         r = extract("openai-chat", {"messages": [{"role": "tool", "content": "tool output"}]})
         assert r.token_breakdown["tool_results"] == estimate_tokens("tool output")
+
+    def test_file_search_result_tokens(self):
+        r = extract("openai-chat", {"messages": [
+            {"role": "assistant", "tool_calls": [
+                {"id": "c1", "function": {"name": "Glob", "arguments": "{}"}},
+            ]},
+            {"role": "tool", "tool_call_id": "c1", "content": "a.py\nb.py"},
+        ]})
+        assert r.file_search_tokens == estimate_tokens("a.py\nb.py")
+
+    def test_non_search_tool_result_not_measured(self):
+        r = extract("openai-chat", {"messages": [
+            {"role": "assistant", "tool_calls": [
+                {"id": "c1", "function": {"name": "Bash", "arguments": "ls"}},
+            ]},
+            {"role": "tool", "tool_call_id": "c1", "content": "output"},
+        ]})
+        assert r.file_search_tokens == 0
 
     def test_tool_definitions_counted(self):
         tools = [{"type": "function", "function": {"name": "get_weather", "parameters": {}}}]
@@ -309,6 +361,20 @@ class TestExtractOpenAIResponses:
         ]})
         assert r.token_count == estimate_tokens("chain of thought")
 
+    def test_file_search_result_tokens(self):
+        r = extract("openai-responses", {"input": [
+            {"type": "function_call", "call_id": "c1", "name": "LS", "arguments": "{}"},
+            {"type": "function_call_output", "call_id": "c1", "output": "dir listing"},
+        ]})
+        assert r.file_search_tokens == estimate_tokens("dir listing")
+
+    def test_non_search_tool_result_not_measured(self):
+        r = extract("openai-responses", {"input": [
+            {"type": "function_call", "call_id": "c1", "name": "shell", "arguments": "rg foo"},
+            {"type": "function_call_output", "call_id": "c1", "output": "hits"},
+        ]})
+        assert r.file_search_tokens == 0
+
 
 def test_extract_unknown_protocol_raises():
     with pytest.raises(ValueError):
@@ -362,6 +428,69 @@ class TestResolve:
         r = _resolve("auto", body, threshold=100)
         assert r.destination == "pro"
         assert r.label == "longContext"
+
+    def test_l3_search_discount_keeps_flash(self):
+        """Grep results inflate the raw count past the threshold, but the
+        discounted effective count stays under it."""
+        body = {"messages": [
+            {"role": "assistant", "content": [
+                {"type": "tool_use", "id": "t1", "name": "Grep", "input": {}},
+            ]},
+            {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": "t1", "content": "x" * 500},
+            ]},
+        ]}
+        r = _resolve("auto", body, threshold=100)  # raw 126 tokens, effective ~39
+        assert r.destination == "flash"
+        assert r.label == "default"
+
+    def test_l3_non_search_results_go_pro(self):
+        """Same bulk from a non-search tool (Read) still crosses."""
+        body = {"messages": [
+            {"role": "assistant", "content": [
+                {"type": "tool_use", "id": "t1", "name": "Read", "input": {}},
+            ]},
+            {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": "t1", "content": "x" * 500},
+            ]},
+        ]}
+        r = _resolve("auto", body, threshold=100)
+        assert r.destination == "pro"
+        assert r.label == "longContext"
+
+    def test_l3_discount_one_restores_raw_comparison(self):
+        """Weight 1.0 = feature off: search results count in full."""
+        body = {"messages": [
+            {"role": "assistant", "content": [
+                {"type": "tool_use", "id": "t1", "name": "Grep", "input": {}},
+            ]},
+            {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": "t1", "content": "x" * 500},
+            ]},
+        ]}
+        r = _resolve("auto", body, threshold=100, search_discount=1.0)
+        assert r.destination == "pro"
+        assert r.label == "longContext"
+
+    def test_l3_monotone_across_session(self):
+        """Append-only history: effective tokens never drop, and the
+        destination flips flash -> pro at most once (no flip-flop)."""
+        tool_call = {"type": "tool_use", "id": "t1", "name": "Grep", "input": {}}
+        search_result = {"type": "tool_result", "tool_use_id": "t1", "content": "x" * 400}
+        effs = []
+        dests = []
+        for i in range(1, 6):
+            body = {"messages": [
+                {"role": "assistant", "content": [tool_call]},
+                {"role": "user", "content": [search_result] * i},
+            ]}
+            feat = extract("anthropic", body)
+            effs.append(effective_tokens(feat.token_count, feat.file_search_tokens))
+            dests.append(_resolve("auto", body, threshold=100).destination)
+        assert effs == sorted(effs)
+        assert sum(1 for a, b in zip(dests, dests[1:]) if a != b) <= 1
+        if "pro" in dests:  # once pro, always pro
+            assert set(dests[dests.index("pro"):]) == {"pro"}
 
     def test_l3_image_goes_pro(self):
         body = {"messages": [{"content": [{"type": "image", "data": "x"}]}]}

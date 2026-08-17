@@ -21,13 +21,14 @@ from awerouter.types import RequestLog
 
 def _log(ts: str, label: str, token_count: int, destination="flash", bytes_=100,
          profile="cc-1", status=200, ms=10, model_out="m", provider="p", duration_ms=0,
-         protocol="anthropic", agent="", tokens=None):
+         protocol="anthropic", agent="", tokens=None, file_search_tokens=0):
     return RequestLog(
         ts=ts, request_id="req-1", model_in="c1/pro", label=label, destination=destination,
         provider=provider, model_out=model_out, status=status, ms=ms,
         duration_ms=duration_ms, bytes=bytes_,
         token_count=token_count, profile=profile,
         protocol=protocol, agent=agent, tokens=tokens or {},
+        file_search_tokens=file_search_tokens,
     )
 
 
@@ -435,6 +436,15 @@ class TestTokenDistribution:
         assert d["n"] == 3
         assert d["min"] == 10
         assert d["max"] == 500
+
+    def test_search_discount_applies(self, _log_dir):
+        """Distribution over effective tokens: raw 1000 with 600 file-search
+        at the default 0.3 weight counts as 1000 - int(600 * 0.7) = 580."""
+        from awerouter.logging import append
+        append(_log("t1", "default", 1000, file_search_tokens=600))
+        d = token_distribution()
+        assert (d["min"], d["max"]) == (580, 580)
+        assert token_distribution(discount=1.0)["min"] == 1000
 
     def test_percentiles(self, _log_dir):
         from awerouter.logging import append

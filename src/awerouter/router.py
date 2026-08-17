@@ -10,6 +10,7 @@ Three-layer first-match-wins pipeline over a precomputed InspectResult
 
 from __future__ import annotations
 
+from awerouter.protocols import effective_tokens
 from awerouter.types import Destination, InspectResult, ResolveResult
 
 
@@ -21,6 +22,7 @@ def resolve(
     think_model: str,
     long_context_threshold: int,
     web_search_model: str = "pro",
+    search_discount: float = 0.3,
 ) -> ResolveResult:
     m = model or ""
 
@@ -51,7 +53,10 @@ def resolve(
         )
 
     # L3: difficulty score (cost-first: default -> flash) -----------------
-    if feat.token_count > long_context_threshold:
+    # File-search results (Grep/Glob/LS) count at settings.searchResultDiscount:
+    # bulk they add is cheap for flash to carry, so they must not alone tip the
+    # scale to pro.
+    if effective_tokens(feat.token_count, feat.file_search_tokens, search_discount) > long_context_threshold:
         return ResolveResult(
             destination="pro",
             model=dests["pro"].model,

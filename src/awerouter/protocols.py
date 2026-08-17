@@ -58,6 +58,22 @@ def estimate_tokens(text: str) -> int:
 # Cross-protocol token buckets (InspectResult.token_breakdown keys).
 TOKEN_TYPES = ("system", "messages", "tools", "tool_results", "tool_calls", "thinking")
 
+# File-search tools whose results inflate context cheaply (match lists, not
+# prose the model must reason over). L3 weighs their tokens against the
+# threshold at a discount — see effective_tokens. Blind spot: agents that
+# wrap searches in a shell tool (Codex) expose no tool name to match.
+_FILE_SEARCH_TOOLS = frozenset({"Grep", "Glob", "LS"})
+
+
+def effective_tokens(token_count: int, file_search_tokens: int, discount: float = 0.3) -> int:
+    """token_count with file-search result tokens weighed at `discount`.
+
+    What L3 compares against longContextThreshold. Both inputs only grow
+    under append-only history, so the result does too: a session crosses
+    flash -> pro at most once (no flip-flop, prefix caches survive).
+    """
+    return token_count - int(file_search_tokens * (1.0 - discount))
+
 
 def _new_buckets() -> dict:
     return {key: [] for key in TOKEN_TYPES}
@@ -115,6 +131,8 @@ def _extract_anthropic(body: dict) -> InspectResult:
     b["system"].append(_block_text(body.get("system")))
     b["tools"].append(_tool_defs_text(body.get("tools")))
     has_image = False
+    tool_names: dict = {}   # tool_use id -> name; a call always precedes its result
+    search_texts: list[str] = []
     for msg in messages:
         content = msg.get("content")
         if isinstance(content, str):
@@ -129,9 +147,13 @@ def _extract_anthropic(body: dict) -> InspectResult:
                 elif btype == "image":
                     has_image = True
                 elif btype == "tool_result":
-                    b["tool_results"].append(_block_text(block.get("content")))
+                    text = _block_text(block.get("content"))
+                    b["tool_results"].append(text)
+                    if tool_names.get(block.get("tool_use_id")) in _FILE_SEARCH_TOOLS:
+                        search_texts.append(text)
                 elif btype == "tool_use":
                     b["tool_calls"].append(_tool_use_input_text(block.get("input")))
+                    tool_names[block.get("id")] = block.get("name")
                 elif btype == "thinking":
                     b["thinking"].append(block.get("thinking", ""))
     token_count, breakdown = _summarize(b)
@@ -141,6 +163,7 @@ def _extract_anthropic(body: dict) -> InspectResult:
         has_web_search=_has_web_search_flat(body),
         message_count=len(messages),
         token_breakdown=breakdown,
+        file_search_tokens=estimate_tokens(" ".join(t for t in search_texts if t)),
     )
 
 
@@ -164,6 +187,8 @@ def _extract_openai_chat(body: dict) -> InspectResult:
     b = _new_buckets()
     b["tools"].append(_tool_defs_text(body.get("tools")))
     has_image = False
+    tool_names: dict = {}   # tool_call id -> function name
+    search_texts: list[str] = []
     for msg in messages:
         role = msg.get("role")
         if role == "system":
@@ -172,20 +197,29 @@ def _extract_openai_chat(body: dict) -> InspectResult:
             bucket = b["tool_results"]
         else:
             bucket = b["messages"]
+        is_search_result = (
+            role == "tool" and tool_names.get(msg.get("tool_call_id")) in _FILE_SEARCH_TOOLS
+        )
         content = msg.get("content")
         if isinstance(content, str):
             bucket.append(content)
+            if is_search_result:
+                search_texts.append(content)
         elif isinstance(content, list):
             for part in content:
                 if not isinstance(part, dict):
                     continue
                 if part.get("type") == "text":
-                    bucket.append(part.get("text", ""))
+                    text = part.get("text", "")
+                    bucket.append(text)
+                    if is_search_result:
+                        search_texts.append(text)
                 elif part.get("type") == "image_url":
                     has_image = True
         for call in msg.get("tool_calls") or []:
             if isinstance(call, dict) and isinstance(call.get("function"), dict):
                 b["tool_calls"].append(call["function"].get("arguments") or "")
+                tool_names[call.get("id")] = call["function"].get("name")
     token_count, breakdown = _summarize(b)
     return InspectResult(
         token_count=token_count,
@@ -193,6 +227,7 @@ def _extract_openai_chat(body: dict) -> InspectResult:
         has_web_search=_has_web_search_chat(body),
         message_count=len(messages),
         token_breakdown=breakdown,
+        file_search_tokens=estimate_tokens(" ".join(t for t in search_texts if t)),
     )
 
 
@@ -233,6 +268,8 @@ def _extract_openai_responses(body: dict) -> InspectResult:
         )
     has_image = False
     message_count = 0
+    tool_names: dict = {}   # call_id -> name
+    search_texts: list[str] = []
     for item in input_value or []:
         if not isinstance(item, dict):
             continue
@@ -241,8 +278,12 @@ def _extract_openai_responses(body: dict) -> InspectResult:
             itype = item.get("type")
             if itype == "function_call":
                 b["tool_calls"].append(item.get("arguments") or "")
+                tool_names[item.get("call_id")] = item.get("name")
             elif itype == "function_call_output":
-                b["tool_results"].append(_block_text(item.get("output")))
+                text = _block_text(item.get("output"))
+                b["tool_results"].append(text)
+                if tool_names.get(item.get("call_id")) in _FILE_SEARCH_TOOLS:
+                    search_texts.append(text)
             elif itype == "reasoning":
                 b["thinking"].append(_block_text(item.get("summary")))
             continue
@@ -264,6 +305,7 @@ def _extract_openai_responses(body: dict) -> InspectResult:
         has_web_search=_has_web_search_responses(body),
         message_count=message_count,
         token_breakdown=breakdown,
+        file_search_tokens=estimate_tokens(" ".join(t for t in search_texts if t)),
     )
 
 
