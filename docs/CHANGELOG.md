@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.4.0 - 2026-08-17
+
+awerouter now detects file-search tools wrapped inside shell commands (Codex `exec_command` / `shell`), and usage commands surface the discounted file-search token counts alongside raw totals.
+
+### Added
+- `protocols.py`: `_is_file_search()`, `_is_search_command()`, and `_shell_is_search()` recognize file-search traffic inside shell commands — compound commands split on `;` / `&&` / `||` / newlines, pipeline heads are inspected, env-prefixed and absolute-path binaries are supported, and `git grep` is recognized. Both Codex's single-command `cmd` string and older argv-form `command` arrays are handled. Case-insensitive matching covers opencode's lowercase `grep` / `glob` / `list` names, and `list` joins the direct file-search tool set.
+- `usage log --tokens` annotates `tool_results` with the embedded file-search count, e.g. `results=20(search=20)`.
+- `usage tokens` and `usage stats` headers now print the active `search discount`, raw `search` token total, and L3 `effective` token total for the filtered window.
+- Tests: `test_router.py` covers case-insensitive names, shell-wrapped search binaries, env-prefixed paths, `git grep`, non-search shell commands, multiline commands, and argv-form command arrays.
+
+### Changed
+- L3 difficulty scoring now applies `searchResultDiscount` to file-search tokens whether they come from direct file-search tool results or from shell-wrapped search commands, so Codex bulk-search traffic no longer inflates effective context.
+- `usage log` window filters (`--profile`, `--since`) read the whole log first, then filter, then take the last `--lines` — matches outside the raw tail window are no longer silently dropped.
+- `usage tokens` prints the file-search subset inside the `tool_results` line (`includes 20 search at 30% weight`) so per-type totals stay additive and backward-compatible.
+
 ## v0.3.9 - 2026-08-17
 
 `longContextThreshold` can now be set to `"auto"` in `routing.json`. At each `serve` start, awerouter takes the `percentile` of the profile's own L3 effective-token distribution over the trailing `windowDays` as the threshold. With fewer than `minSamples` L3 requests in the window, `fallbackThreshold` applies instead. All four knobs live in `settings.longContextAuto` (all optional).
