@@ -1,4 +1,5 @@
 <div align="center">
+  <img src="logo/logo.png" alt="awerouter" width="860">
   <h1>awerouter: 智能 LLM 路由 <a href="https://github.com/Webioinfo01/aweskill"><img src="https://raw.githubusercontent.com/Webioinfo01/aweskill/main/logo/aweskill-badge2.svg" alt="aweskill companion"></a></h1>
   <p><strong>轻量任务走 Flash，复杂决策走 Pro。</strong></p>
   <p>按请求结构信号做确定性路由的同协议透明代理——不猜语义、不用关键词、不跑分类器。支持 Anthropic Messages、OpenAI Chat Completions、OpenAI Responses 三种协议。</p>

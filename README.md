@@ -1,4 +1,5 @@
 <div align="center">
+  <img src="logo/logo.png" alt="awerouter" width="860">
   <h1>awerouter: Smart LLM Router <a href="https://github.com/Webioinfo01/aweskill"><img src="https://raw.githubusercontent.com/Webioinfo01/aweskill/main/logo/aweskill-badge2.svg" alt="aweskill companion"></a></h1>
   <p><strong>Route cheap/fast tasks to Flash, hard decisions to Pro.</strong></p>
   <p>Transparent same-protocol proxy that routes coding-agent requests by structural signals — no keyword guessing, no LLM classifier. Speaks Anthropic Messages, OpenAI Chat Completions, and OpenAI Responses.</p>
