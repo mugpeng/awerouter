@@ -222,6 +222,24 @@ def _settings_or_default():
         return None
 
 
+def _usage_header(since, profile_name):
+    """Print search-discount context for the filtered window."""
+    from awerouter.logging import tail as _tail
+    settings = _settings_or_default()
+    discount = settings.search_result_discount if settings else 0.3
+    cutoff = _parse_since(since) if since else None
+    entries = [e for e in _tail(None) if _passes_log(e, cutoff, profile_name)]
+    if not entries:
+        return
+    total = sum(e.token_count for e in entries)
+    fs = sum(e.file_search_tokens for e in entries)
+    eff = effective_tokens(total, fs, discount)
+    if fs == 0:
+        click.echo(f"search discount: {discount:.0%}  |  total: {total:,}  |  search: 0")
+        return
+    click.echo(f"search discount: {discount:.0%}  |  total: {total:,}  |  search: {fs:,}  |  L3 effective: {eff:,}")
+
+
 def _usage_log(n, since=None, profile_name=None, tokens_mode=False):
     from awerouter.logging import tail as _tail
     # With a window filter, read the whole log and filter FIRST, then take the
@@ -243,9 +261,14 @@ def _usage_log(n, since=None, profile_name=None, tokens_mode=False):
             f"{e.provider:12s}  {e.model_out:24s}  {e.label:14s}  "
         )
         if tokens_mode:
-            detail = " ".join(f"{_TOKEN_SHORT.get(k, k)}={v}" for k, v in e.tokens.items()) or "-"
-            if e.file_search_tokens:
-                detail += f"  search={e.file_search_tokens}"
+            parts = []
+            for k, v in e.tokens.items():
+                short = _TOKEN_SHORT.get(k, k)
+                if k == "tool_results" and e.file_search_tokens:
+                    parts.append(f"{short}={v}({e.file_search_tokens})")
+                else:
+                    parts.append(f"{short}={v}")
+            detail = " ".join(parts) or "-"
             click.echo(f"{head}tokens={e.token_count}  {detail}")
             continue
         status_s = str(e.status) if e.status is not None else "-"
@@ -344,6 +367,7 @@ def log(lines: int, show_all: bool, tokens_mode: bool, since, profile_name):
 
     Last --lines by default; --all shows every entry.
     """
+    _usage_header(since, profile_name)
     _usage_log(None if show_all else lines, since, profile_name, tokens_mode)
 
 
@@ -352,6 +376,7 @@ def log(lines: int, show_all: bool, tokens_mode: bool, since, profile_name):
 @_profile_opt
 def stats(since, profile_name):
     """Routing summary, grouped by profile."""
+    _usage_header(since, profile_name)
     _usage_stats(since, profile_name)
 
 
@@ -363,6 +388,7 @@ _TOKEN_TYPE_ORDER = ("messages", "system", "tools", "tool_results", "tool_calls"
 @_profile_opt
 def tokens(since, profile_name):
     """Input-token totals by content type (messages, system, tools, tool I/O)."""
+    _usage_header(since, profile_name)
     _usage_tokens(since, profile_name)
 
 
@@ -431,23 +457,21 @@ def _usage_tokens(since, profile_name):
         click.echo("(no logs yet)")
         return
     n, total = b["requests"], b["total"]
-    click.echo(f"input tokens by type ({n} requests, all request content):")
+    settings = _settings_or_default()
+    discount = settings.search_result_discount if settings else 0.3
+    fs = b.get("file_search_tokens", 0)
+    eff = effective_tokens(total, fs, discount)
+    click.echo(f"input tokens by type ({n} requests, total {total:,}  search {fs:,}  effective {eff:,}):")
     keys = [k for k in _TOKEN_TYPE_ORDER if k in b["by_type"]]
     keys += [k for k in b["by_type"] if k not in _TOKEN_TYPE_ORDER]
     for k in keys:
         v = b["by_type"][k]
         pct = round(100 * v / total) if total else 0
-        click.echo(f"  {k:13s} {v:>11,}  {pct:>3}%  avg {v // max(n, 1):,}/req")
-    fs = b.get("file_search_tokens", 0)
-    if fs:
-        pct = round(100 * fs / total) if total else 0
-        click.echo(f"  {'file_search':13s} {fs:>11,}  {pct:>3}%  avg {fs // max(n, 1):,}/req"
-                   "  (subset of tool_results)")
-        settings = _settings_or_default()
-        discount = settings.search_result_discount if settings else 0.3
-        eff = effective_tokens(total, fs, discount)
-        click.echo(f"  → L3 effective: {eff:,} of {total:,}  "
-                   f"(file-search weighed at {discount:.0%})")
+        if k == "tool_results" and fs:
+            click.echo(f"  {k:13s} {v:>11,}  {pct:>3}%  avg {v // max(n, 1):,}/req"
+                       f"  (includes {fs} search at {discount:.0%} weight)")
+        else:
+            click.echo(f"  {k:13s} {v:>11,}  {pct:>3}%  avg {v // max(n, 1):,}/req")
     if b["legacy_requests"]:
         click.echo(
             f"  ({b['legacy_requests']} pre-breakdown entries, "
@@ -506,6 +530,7 @@ _CACHE_WRITE_FACTOR = 1.25
 @_profile_opt
 def savings(since, profile_name):
     """Token accounting vs a pro-only setup (token view, no prices)."""
+    _usage_header(since, profile_name)
     _usage_savings(since, profile_name)
 
 

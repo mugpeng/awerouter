@@ -60,6 +60,8 @@ class TestSavings:
         self._seed_logs(monkeypatch, tmp_path)
         r = CliRunner().invoke(cli, ["usage", "savings"])
         assert r.exit_code == 0, r.output
+        assert "search discount: 30%" in r.output
+        assert "search: 0" in r.output
         assert "requests: 3  (flash 1 / pro 2, 33% flash, fallback 1)" in r.output
         lines = r.output.splitlines()
         assert any(l.strip().startswith("flash") and "100" in l for l in lines)
@@ -264,8 +266,8 @@ class TestUsage:
             ts=datetime.now(timezone.utc).isoformat(), request_id="r1", model_in="auto",
             label="default", destination="flash", provider="stepfun",
             model_out="sf-flash", status=200, ms=800, duration_ms=1500, bytes=100,
-            token_count=120, profile="cc-1", protocol="anthropic", agent="claude-code",
-            tokens={"messages": 80, "system": 30, "tools": 10},
+            token_count=140, profile="cc-1", protocol="anthropic", agent="claude-code",
+            tokens={"messages": 80, "system": 30, "tools": 10, "tool_results": 20},
             file_search_tokens=20,
         ))
 
@@ -308,6 +310,8 @@ class TestUsage:
         self._seed_log(tmp_path, monkeypatch)
         r = CliRunner().invoke(cli, ["usage", "stats"])
         assert r.exit_code == 0, r.output
+        assert "search discount: 30%" in r.output
+        assert "search: 20" in r.output
         assert "total_requests : 1" in r.output
         assert "profile cc-1 [anthropic]" in r.output
         assert "claude-code" in r.output
@@ -318,7 +322,7 @@ class TestUsage:
         r = CliRunner().invoke(cli, ["usage", "log", "--lines", "5"])
         assert r.exit_code == 0, r.output
         assert "sf-flash" in r.output
-        assert "tokens=120" in r.output
+        assert "tokens=140" in r.output
         assert "anthropic" in r.output
         assert "claude-code" in r.output
 
@@ -328,7 +332,7 @@ class TestUsage:
         r = CliRunner().invoke(cli, ["usage", "log", "--all"])
         assert r.exit_code == 0, r.output
         assert "sf-flash" in r.output
-        assert "tokens=120" in r.output
+        assert "tokens=140" in r.output
 
     def test_log_tokens_flag(self, tmp_path, monkeypatch):
         _setup(tmp_path, monkeypatch, _providers(), _routing())
@@ -338,7 +342,11 @@ class TestUsage:
         assert "msg=80" in r.output
         assert "sys=30" in r.output
         assert "tools=10" in r.output
-        assert "search=20" in r.output
+        # search token count nested inside results: results=20(20)
+        assert "results=20(20)" in r.output
+        # header line
+        assert "search discount: 30%" in r.output
+        assert "search: 20" in r.output
         assert "status=" not in r.output
         assert "in=auto" not in r.output
 
@@ -347,15 +355,13 @@ class TestUsage:
         self._seed_log(tmp_path, monkeypatch)
         r = CliRunner().invoke(cli, ["usage", "tokens"])
         assert r.exit_code == 0, r.output
-        assert "input tokens by type (1 requests" in r.output
+        assert "input tokens by type (1 requests, total 140  search 20  effective 126):" in r.output
         assert "messages" in r.output and "80" in r.output
         assert "system" in r.output and "30" in r.output
         assert "tools" in r.output and "10" in r.output
         assert "avg 80/req" in r.output
-        # file-search subset + effective total: 120 - int(20 * 0.7) = 106
-        assert "file_search" in r.output
-        assert "L3 effective: 106 of 120" in r.output
-        assert "weighed at 30%" in r.output
+        # search embedded in tool_results, effective total in header
+        assert "tool_results           20   14%  avg 20/req  (includes 20 search at 30% weight)" in r.output
 
     def test_tokens_no_logs(self, tmp_path, monkeypatch):
         _setup(tmp_path, monkeypatch)
