@@ -277,6 +277,31 @@ class TestUsage:
         assert "Usage:" in r.output
         assert "total_requests" not in r.output  # no default view
 
+    def test_log_window_filter_reads_whole_file(self, tmp_path, monkeypatch):
+        """--profile/--since filter the whole log first, then take the last
+        --lines — matches outside the raw last-20 window must still show."""
+        _setup(tmp_path, monkeypatch, _providers(), _routing())
+        log_dir = tmp_path / "logs"
+        monkeypatch.setenv("AWEROUTER_LOG_DIR", str(log_dir))
+        from awerouter.logging import append
+        from awerouter.types import RequestLog
+
+        def _entry(i, profile):
+            return RequestLog(
+                ts=f"2026-01-01T00:{i:02d}:00+00:00", request_id=f"r{i}", model_in="auto",
+                label="default", destination="flash", provider="stepfun", model_out="sf-flash",
+                status=200, ms=1, bytes=1, token_count=1, profile=profile, protocol="anthropic",
+            )
+
+        for i in range(3):
+            append(_entry(i, "cc-2"))
+        for i in range(3, 28):  # push the cc-2 entries out of the raw last-20 window
+            append(_entry(i, "cc-1"))
+        r = CliRunner().invoke(cli, ["usage", "log", "--profile", "cc-2"])
+        assert r.exit_code == 0, r.output
+        lines = [l for l in r.output.splitlines() if "tokens=" in l]
+        assert len(lines) == 3
+
     def test_stats_subcommand(self, tmp_path, monkeypatch):
         _setup(tmp_path, monkeypatch, _providers(), _routing())
         self._seed_log(tmp_path, monkeypatch)

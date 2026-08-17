@@ -215,10 +215,15 @@ _TOKEN_SHORT = {
 
 def _usage_log(n, since=None, profile_name=None, tokens_mode=False):
     from awerouter.logging import tail as _tail
-    entries = _tail(n)  # n is None => whole file
+    # With a window filter, read the whole log and filter FIRST, then take the
+    # last n — otherwise matches outside the raw last-n window never show.
     if since or profile_name:
         cutoff = _parse_since(since) if since else None
-        entries = [e for e in entries if _passes_log(e, cutoff, profile_name)]
+        entries = [e for e in _tail(None) if _passes_log(e, cutoff, profile_name)]
+        if n:
+            entries = entries[-n:]
+    else:
+        entries = _tail(n)  # n is None => whole file
     if not entries:
         click.echo("(no logs yet)")
         return
