@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Structured append-only request log."""
 
 import json
