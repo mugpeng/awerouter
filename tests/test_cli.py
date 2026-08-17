@@ -266,6 +266,7 @@ class TestUsage:
             model_out="sf-flash", status=200, ms=800, duration_ms=1500, bytes=100,
             token_count=120, profile="cc-1", protocol="anthropic", agent="claude-code",
             tokens={"messages": 80, "system": 30, "tools": 10},
+            file_search_tokens=20,
         ))
 
     def test_bare_usage_shows_help(self, tmp_path, monkeypatch):
@@ -337,6 +338,7 @@ class TestUsage:
         assert "msg=80" in r.output
         assert "sys=30" in r.output
         assert "tools=10" in r.output
+        assert "search=20" in r.output
         assert "status=" not in r.output
         assert "in=auto" not in r.output
 
@@ -350,6 +352,10 @@ class TestUsage:
         assert "system" in r.output and "30" in r.output
         assert "tools" in r.output and "10" in r.output
         assert "avg 80/req" in r.output
+        # file-search subset + effective total: 120 - int(20 * 0.7) = 106
+        assert "file_search" in r.output
+        assert "L3 effective: 106 of 120" in r.output
+        assert "weighed at 30%" in r.output
 
     def test_tokens_no_logs(self, tmp_path, monkeypatch):
         _setup(tmp_path, monkeypatch)

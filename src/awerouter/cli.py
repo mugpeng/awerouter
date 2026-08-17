@@ -26,7 +26,7 @@ from awerouter.config import (
     save_provider,
     validate_profiles,
 )
-from awerouter.protocols import PROTOCOL_IDS
+from awerouter.protocols import PROTOCOL_IDS, effective_tokens
 from awerouter.server import _serve
 from awerouter.types import AutoThresholdConfig
 
@@ -213,6 +213,15 @@ _TOKEN_SHORT = {
 }
 
 
+def _settings_or_default():
+    """Loaded routing settings, or None — usage views must not require
+    routing.json to exist."""
+    try:
+        return load_routing()[0]
+    except SystemExit:
+        return None
+
+
 def _usage_log(n, since=None, profile_name=None, tokens_mode=False):
     from awerouter.logging import tail as _tail
     # With a window filter, read the whole log and filter FIRST, then take the
@@ -235,6 +244,8 @@ def _usage_log(n, since=None, profile_name=None, tokens_mode=False):
         )
         if tokens_mode:
             detail = " ".join(f"{_TOKEN_SHORT.get(k, k)}={v}" for k, v in e.tokens.items()) or "-"
+            if e.file_search_tokens:
+                detail += f"  search={e.file_search_tokens}"
             click.echo(f"{head}tokens={e.token_count}  {detail}")
             continue
         status_s = str(e.status) if e.status is not None else "-"
@@ -427,6 +438,16 @@ def _usage_tokens(since, profile_name):
         v = b["by_type"][k]
         pct = round(100 * v / total) if total else 0
         click.echo(f"  {k:13s} {v:>11,}  {pct:>3}%  avg {v // max(n, 1):,}/req")
+    fs = b.get("file_search_tokens", 0)
+    if fs:
+        pct = round(100 * fs / total) if total else 0
+        click.echo(f"  {'file_search':13s} {fs:>11,}  {pct:>3}%  avg {fs // max(n, 1):,}/req"
+                   "  (subset of tool_results)")
+        settings = _settings_or_default()
+        discount = settings.search_result_discount if settings else 0.3
+        eff = effective_tokens(total, fs, discount)
+        click.echo(f"  → L3 effective: {eff:,} of {total:,}  "
+                   f"(file-search weighed at {discount:.0%})")
     if b["legacy_requests"]:
         click.echo(
             f"  ({b['legacy_requests']} pre-breakdown entries, "
@@ -445,10 +466,7 @@ def calibrate(since, profile_name):
     """
     from awerouter.logging import auto_threshold, token_distribution
     cutoff = _window_cutoff(since, profile_name)
-    try:
-        settings = load_routing()[0]
-    except SystemExit:
-        settings = None  # calibrate is a log view; routing.json missing → defaults
+    settings = _settings_or_default()
     discount = settings.search_result_discount if settings else 0.3
     d = token_distribution(cutoff, profile_name, discount)
     if not d:

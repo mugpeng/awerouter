@@ -75,13 +75,14 @@ class TestTokenBreakdown:
     def test_sums_by_type(self, _log_dir):
         from awerouter.logging import append
         append(_log("t1", "default", 120, "flash",
-                    tokens={"messages": 80, "system": 30, "tools": 10}))
+                    tokens={"messages": 80, "system": 30, "tools": 10}, file_search_tokens=40))
         append(_log("t2", "default", 30, "flash",
                     tokens={"messages": 20, "system": 10}))
         b = token_breakdown()
         assert b["requests"] == 2
         assert b["by_type"] == {"messages": 100, "system": 40, "tools": 10}
         assert b["total"] == 150
+        assert b["file_search_tokens"] == 40
         assert b["legacy_requests"] == 0
 
     def test_legacy_entries_counted_separately(self, _log_dir):

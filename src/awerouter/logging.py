@@ -171,7 +171,8 @@ def token_totals(since=None, profile=None) -> dict:
 
 
 def token_breakdown(since=None, profile=None) -> dict:
-    """Input-token totals by request content type (system/messages/tools/...).
+    """Input-token totals by request content type (system/messages/tools/...),
+    plus the file-search subset of tool_results (raw, undiscounted).
 
     Entries logged before the per-type breakdown exist count separately as
     legacy (their token_count cannot be split retroactively).
@@ -180,6 +181,7 @@ def token_breakdown(since=None, profile=None) -> dict:
     if not f.exists():
         return {}
     by_type: dict = {}
+    file_search = 0
     requests = 0
     legacy_requests = 0
     legacy_tokens = 0
@@ -197,6 +199,7 @@ def token_breakdown(since=None, profile=None) -> dict:
             requests += 1
             for key, value in tokens.items():
                 by_type[key] = by_type.get(key, 0) + value
+            file_search += data.get("file_search_tokens", 0)
         else:
             legacy_requests += 1
             legacy_tokens += data.get("token_count", 0)
@@ -207,6 +210,7 @@ def token_breakdown(since=None, profile=None) -> dict:
         "legacy_requests": legacy_requests,
         "legacy_tokens": legacy_tokens,
         "by_type": by_type,
+        "file_search_tokens": file_search,
         "total": sum(by_type.values()),
     }
 
