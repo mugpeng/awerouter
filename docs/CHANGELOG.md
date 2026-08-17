@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.3.9 - 2026-08-17
+
+`longContextThreshold` can now be set to `"auto"` in `routing.json`. At each `serve` start, awerouter takes the `percentile` of the profile's own L3 effective-token distribution over the trailing `windowDays` as the threshold. With fewer than `minSamples` L3 requests in the window, `fallbackThreshold` applies instead. All four knobs live in `settings.longContextAuto` (all optional).
+
+### Added
+- `AutoThresholdConfig` dataclass (`types.py`): `percentile` (default 95), `windowDays` (default 7), `minSamples` (default 50), `fallbackThreshold` (default 8000).
+- `auto_threshold()` in `logging.py`: picks the threshold from a profile's own L3 traffic over the configured trailing window, or returns `None` when samples are insufficient.
+- `_resolve_auto_threshold()` in `server.py`: materializes `"auto"` once at serve start (before the socket opens), so the value is fixed for the process lifetime. The banner prints what was picked and why.
+- `_l3_tokens()` helper + `_base_label()`: `token_distribution` now delegates to `_l3_tokens`, which strips the `→fallback` suffix before the L3 label check — flash→pro fallback entries still calibrate.
+- `default-routing.json` ships with a `longContextAuto` block using the defaults.
+- `awerouter add` wizard accepts `"auto"` for `longContextThreshold` and persists it as the string `"auto"`.
+- `awerouter list` shows `L3>auto` for auto profiles.
+- `usage calibrate` ends with the value `"auto"` would pick under the current policy (or a fallback notice when samples are insufficient), independent of the `--since` view.
+- Tests: `test_cli.py`, `test_config.py`, `test_logging.py`, `test_server.py` cover the new type, config parsing, wizard output, calibration display, auto threshold logic, and serve-start resolution.
+
+### Changed
+- `load_routing()` parses `settings.longContextAuto` (partial fills keep defaults) and marks profiles with `threshold_auto=True` when `longContextThreshold` is the string `"auto"`. Before serve resolves it, the profile reads `fallbackThreshold`.
+- `format_routing_display()` serializes `longContextAuto` and prints `"auto"` for auto profiles.
+- Removed stale TODO docs (`docs/todo/code-quality.md`, `docs/todo/l3-complexity.md`).
+
 ## v0.3.8 - 2026-08-17
 
 ### Added
