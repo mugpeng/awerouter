@@ -38,6 +38,7 @@ You may run these read-only or non-interactive commands:
 - `awerouter list`
 - `awerouter usage stats`
 - `awerouter usage log`
+- `awerouter usage tokens`
 - `awerouter usage calibrate`
 - `awerouter usage savings`
 
@@ -164,6 +165,10 @@ awerouter usage savings
 ```
 
 Explain the output plainly; do not promise exact billing because output tokens and cache semantics vary by provider.
+
+### Explain token composition
+
+Use `awerouter usage tokens` to show input-token totals by content type (messages, system prompt, tools, tool I/O); `awerouter usage log --tokens` shows the same breakdown per request.
 
 ## Pitfalls
 

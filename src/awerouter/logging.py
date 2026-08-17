@@ -62,6 +62,7 @@ def append(log: RequestLog) -> None:
             "duration_ms": log.duration_ms,
             "bytes": log.bytes,
             "token_count": log.token_count,
+            "tokens": log.tokens,
             "protocol": log.protocol,
             "agent": log.agent,
         }, ensure_ascii=False) + "\n")
@@ -123,6 +124,7 @@ def tail(n: int | None = 20) -> list[RequestLog]:
                 duration_ms=data.get("duration_ms", 0),
                 bytes=data.get("bytes", 0),
                 token_count=data.get("token_count", 0),
+                tokens=data.get("tokens") or {},
                 protocol=data.get("protocol", ""),
                 agent=data.get("agent", ""),
             ))
@@ -163,6 +165,47 @@ def token_totals(since=None, profile=None) -> dict:
     if not (out["flash"]["requests"] or out["pro"]["requests"]):
         return {}
     return out
+
+
+def token_breakdown(since=None, profile=None) -> dict:
+    """Input-token totals by request content type (system/messages/tools/...).
+
+    Entries logged before the per-type breakdown exist count separately as
+    legacy (their token_count cannot be split retroactively).
+    """
+    f = _log_file()
+    if not f.exists():
+        return {}
+    by_type: dict = {}
+    requests = 0
+    legacy_requests = 0
+    legacy_tokens = 0
+    for line in f.read_text(encoding="utf-8").splitlines():
+        if not line:
+            continue
+        try:
+            data = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not _passes(data, since, profile):
+            continue
+        tokens = data.get("tokens") or {}
+        if tokens:
+            requests += 1
+            for key, value in tokens.items():
+                by_type[key] = by_type.get(key, 0) + value
+        else:
+            legacy_requests += 1
+            legacy_tokens += data.get("token_count", 0)
+    if not (requests or legacy_requests):
+        return {}
+    return {
+        "requests": requests,
+        "legacy_requests": legacy_requests,
+        "legacy_tokens": legacy_tokens,
+        "by_type": by_type,
+        "total": sum(by_type.values()),
+    }
 
 
 def cadence(since=None, profile=None) -> dict:

@@ -33,7 +33,7 @@ awerouter 与两个配套工具配合最佳：
 - **[aweskill](https://aweskill.webioinfo.top/)** — 面向 AI agent 的 CLI skill 包管理器。安装 awerouter skill，让你的 agent 用自然语言管理路由。
 - **[aweswitch](https://github.com/Webioinfo01/aweswitch)** — Agent profile 切换器。用指向 awerouter daemon 的 profile 启动 Claude Code、Codex 或 OpenCode 会话。
 
-aweskill 让 agent **管理**路由；aweswitch 让你**启动**走路由的会话。配置一次 awerouter，之后就能用 `aweswitch <profile>` 把任意 agent 启动到它上面。
+aweskill 通过管理skills，让 agent **管理**路由；aweswitch 让你**启动**走路由的会话。配置一次 awerouter，之后就能用 `aweswitch <profile>` 把任意 agent 启动到它上面。
 
 ## 安装与使用
 
@@ -222,18 +222,21 @@ awerouter config show [PROFILE]       # 脱敏全量配置；带 PROFILE 只看�
 awerouter config edit [providers|routing]  # 在 $EDITOR 中打开某个文件（先备份 .bak）
 awerouter usage stats
 awerouter usage clean                 # 删除已保存的请求日志（需确认）
-awerouter usage log [--lines 20] [--all]
+awerouter usage log [--lines 20] [--all] [--tokens]
+awerouter usage tokens
 awerouter usage calibrate
 awerouter usage savings
 ```
 
 所有 `usage` 子命令读的是同一份请求日志；窗口选项放在 `usage` 和子命令之间（`awerouter usage --since today savings`）。
 
-`usage stats` 按 profile 汇总：label/destination/provider/model 分组（带百分比）、错误与降级计数、各 destination/provider/model 的延迟分位数（首字节与总时长）、估算请求 token（全部请求内容：messages、system prompt、工具定义与工具 I/O）。`--since` 接受 `today`、`yesterday`、`7d` 或 `YYYY-MM-DD`（本地时间）；`--profile` 只看单个 profile。`usage clean` 确认后删除已保存的日志（`requests.jsonl` 及轮转备份）。`usage log` 原样显示条目——默认最后 20 条，加 `--all` 显示全部。
+`usage stats` 按 profile 汇总：label/destination/provider/model 分组（带百分比）、错误与降级计数、各 destination/provider/model 的延迟分位数（首字节与总时长）、估算请求 token（全部请求内容：messages、system prompt、工具定义与工具 I/O）。`--since` 接受 `today`、`yesterday`、`7d` 或 `YYYY-MM-DD`（本地时间）；`--profile` 只看单个 profile。`usage clean` 确认后删除已保存的日志（`requests.jsonl` 及轮转备份）。`usage log` 原样显示条目——默认最后 20 条，加 `--all` 显示全部；`--tokens` 把 status/延迟/入站 model 三列换成每条请求的分类型 token 明细（`msg/sys/tools/results/calls/think`），分类型计数之前记录的条目只显示总数。
 
 `config edit` 和 `add` 向导在每次写入前把目标文件快照为 `<名称>.json.bak`；`awerouter restore [providers|routing]` 确认后把备份拷回并校验恢复后的配置。`config path` 打印两个配置文件路径；`config show [PROFILE]` 显示脱敏全量配置，或单个 profile 用到的 provider 与路由条目。
 
 `usage calibrate` 展示 L3 流量（受阈值影响的层）的请求 token 分布（统计全部请求内容：messages、system prompt、工具定义与工具 I/O），并在 p90/p95/p99 处建议 `longContextThreshold` 候选值。跑一段真实流量后执行，再编辑 `routing.json`。
+
+`usage tokens` 按内容类型（messages、system prompt、工具定义、工具结果、工具调用参数、thinking）汇总输入 token 的总量与占比——可以看出请求 token 里多少是环境常量（system prompt + 工具定义）、多少是真实对话。
 
 `usage savings` 是 token 记账视图：各档消化了多少输入请求 token、相对「全部直连 pro」的基线卸载了多少 pro 输入 token。cache sensitivity 小节给出卸载量的上下界（Anthropic 体系按缓存读 ~0.1×、写 ~1.25×、TTL 5 分钟折算），并展示你的换档节奏与 TTL 的关系——pro-only 基线若缓存常热，那些 token 本会按缓存读价计费。输出末尾给出代入式金额公式（token 数为实测值）——把你的输入单价（每百万 token）代入 pro/flash 即可直接算出节省金额（输出 token、flash 侧缓存、能力错配导致的额外轮次均未建模）。
 

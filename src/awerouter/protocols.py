@@ -55,6 +55,24 @@ def estimate_tokens(text: str) -> int:
 # blocks. Images only set has_image.
 # ---------------------------------------------------------------------------
 
+# Cross-protocol token buckets (InspectResult.token_breakdown keys).
+TOKEN_TYPES = ("system", "messages", "tools", "tool_results", "tool_calls", "thinking")
+
+
+def _new_buckets() -> dict:
+    return {key: [] for key in TOKEN_TYPES}
+
+
+def _summarize(buckets: dict) -> tuple:
+    """Estimate each bucket independently; token_count is the sum, so the
+    breakdown always adds up (each non-empty bucket has a 1-token floor)."""
+    breakdown = {
+        key: estimate_tokens(" ".join(p for p in parts if p))
+        for key, parts in buckets.items()
+        if any(parts)
+    }
+    return sum(breakdown.values()), breakdown
+
 
 def _block_text(content) -> str:
     """Text of a content value that is either a plain string or a list of
@@ -93,35 +111,36 @@ def _tool_use_input_text(value) -> str:
 
 def _extract_anthropic(body: dict) -> InspectResult:
     messages = body.get("messages", [])
-    parts: list[str] = [
-        _block_text(body.get("system")),
-        _tool_defs_text(body.get("tools")),
-    ]
+    b = _new_buckets()
+    b["system"].append(_block_text(body.get("system")))
+    b["tools"].append(_tool_defs_text(body.get("tools")))
     has_image = False
     for msg in messages:
         content = msg.get("content")
         if isinstance(content, str):
-            parts.append(content)
+            b["messages"].append(content)
         elif isinstance(content, list):
             for block in content:
                 if not isinstance(block, dict):
                     continue
                 btype = block.get("type")
                 if btype == "text":
-                    parts.append(block.get("text", ""))
+                    b["messages"].append(block.get("text", ""))
                 elif btype == "image":
                     has_image = True
                 elif btype == "tool_result":
-                    parts.append(_block_text(block.get("content")))
+                    b["tool_results"].append(_block_text(block.get("content")))
                 elif btype == "tool_use":
-                    parts.append(_tool_use_input_text(block.get("input")))
+                    b["tool_calls"].append(_tool_use_input_text(block.get("input")))
                 elif btype == "thinking":
-                    parts.append(block.get("thinking", ""))
+                    b["thinking"].append(block.get("thinking", ""))
+    token_count, breakdown = _summarize(b)
     return InspectResult(
-        token_count=estimate_tokens(" ".join(p for p in parts if p)),
+        token_count=token_count,
         has_image=has_image,
         has_web_search=_has_web_search_flat(body),
         message_count=len(messages),
+        token_breakdown=breakdown,
     )
 
 
@@ -142,28 +161,38 @@ def _has_web_search_flat(body: dict) -> bool:
 
 def _extract_openai_chat(body: dict) -> InspectResult:
     messages = body.get("messages", [])
-    parts: list[str] = [_tool_defs_text(body.get("tools"))]
+    b = _new_buckets()
+    b["tools"].append(_tool_defs_text(body.get("tools")))
     has_image = False
     for msg in messages:
+        role = msg.get("role")
+        if role == "system":
+            bucket = b["system"]
+        elif role == "tool":
+            bucket = b["tool_results"]
+        else:
+            bucket = b["messages"]
         content = msg.get("content")
         if isinstance(content, str):
-            parts.append(content)
+            bucket.append(content)
         elif isinstance(content, list):
             for part in content:
                 if not isinstance(part, dict):
                     continue
                 if part.get("type") == "text":
-                    parts.append(part.get("text", ""))
+                    bucket.append(part.get("text", ""))
                 elif part.get("type") == "image_url":
                     has_image = True
         for call in msg.get("tool_calls") or []:
             if isinstance(call, dict) and isinstance(call.get("function"), dict):
-                parts.append(call["function"].get("arguments") or "")
+                b["tool_calls"].append(call["function"].get("arguments") or "")
+    token_count, breakdown = _summarize(b)
     return InspectResult(
-        token_count=estimate_tokens(" ".join(p for p in parts if p)),
+        token_count=token_count,
         has_image=has_image,
         has_web_search=_has_web_search_chat(body),
         message_count=len(messages),
+        token_breakdown=breakdown,
     )
 
 
@@ -189,17 +218,18 @@ def _has_web_search_chat(body: dict) -> bool:
 
 def _extract_openai_responses(body: dict) -> InspectResult:
     input_value = body.get("input")
-    parts: list[str] = [
-        _block_text(body.get("instructions")),
-        _tool_defs_text(body.get("tools")),
-    ]
+    b = _new_buckets()
+    b["system"].append(_block_text(body.get("instructions")))
+    b["tools"].append(_tool_defs_text(body.get("tools")))
     if isinstance(input_value, str):
-        parts.append(input_value)
+        b["messages"].append(input_value)
+        token_count, breakdown = _summarize(b)
         return InspectResult(
-            token_count=estimate_tokens(" ".join(p for p in parts if p)),
+            token_count=token_count,
             has_image=False,
             has_web_search=_has_web_search_responses(body),
             message_count=1 if input_value else 0,
+            token_breakdown=breakdown,
         )
     has_image = False
     message_count = 0
@@ -210,28 +240,30 @@ def _extract_openai_responses(body: dict) -> InspectResult:
         if content is None:
             itype = item.get("type")
             if itype == "function_call":
-                parts.append(item.get("arguments") or "")
+                b["tool_calls"].append(item.get("arguments") or "")
             elif itype == "function_call_output":
-                parts.append(_block_text(item.get("output")))
+                b["tool_results"].append(_block_text(item.get("output")))
             elif itype == "reasoning":
-                parts.append(_block_text(item.get("summary")))
+                b["thinking"].append(_block_text(item.get("summary")))
             continue
         message_count += 1
         if isinstance(content, str):
-            parts.append(content)
+            b["messages"].append(content)
         elif isinstance(content, list):
             for part in content:
                 if not isinstance(part, dict):
                     continue
                 if part.get("type") in ("input_text", "output_text", "text"):
-                    parts.append(part.get("text", ""))
+                    b["messages"].append(part.get("text", ""))
                 elif part.get("type") == "input_image":
                     has_image = True
+    token_count, breakdown = _summarize(b)
     return InspectResult(
-        token_count=estimate_tokens(" ".join(p for p in parts if p)),
+        token_count=token_count,
         has_image=has_image,
         has_web_search=_has_web_search_responses(body),
         message_count=message_count,
+        token_breakdown=breakdown,
     )
 
 

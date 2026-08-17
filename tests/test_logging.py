@@ -12,6 +12,7 @@ from awerouter.logging import (
     log_start,
     stats,
     tail,
+    token_breakdown,
     token_distribution,
     token_totals,
 )
@@ -20,13 +21,13 @@ from awerouter.types import RequestLog
 
 def _log(ts: str, label: str, token_count: int, destination="flash", bytes_=100,
          profile="cc-1", status=200, ms=10, model_out="m", provider="p", duration_ms=0,
-         protocol="anthropic", agent=""):
+         protocol="anthropic", agent="", tokens=None):
     return RequestLog(
         ts=ts, request_id="req-1", model_in="c1/pro", label=label, destination=destination,
         provider=provider, model_out=model_out, status=status, ms=ms,
         duration_ms=duration_ms, bytes=bytes_,
         token_count=token_count, profile=profile,
-        protocol=protocol, agent=agent,
+        protocol=protocol, agent=agent, tokens=tokens or {},
     )
 
 
@@ -63,6 +64,51 @@ class TestTokenTotals:
         cutoff = datetime(2026, 8, 15, tzinfo=timezone.utc)
         t = token_totals(cutoff, "cc-2")
         assert t["flash"] == {"requests": 1, "tokens": 50}
+
+
+class TestTokenBreakdown:
+    def test_empty(self, _log_dir):
+        assert token_breakdown() == {}
+
+    def test_sums_by_type(self, _log_dir):
+        from awerouter.logging import append
+        append(_log("t1", "default", 120, "flash",
+                    tokens={"messages": 80, "system": 30, "tools": 10}))
+        append(_log("t2", "default", 30, "flash",
+                    tokens={"messages": 20, "system": 10}))
+        b = token_breakdown()
+        assert b["requests"] == 2
+        assert b["by_type"] == {"messages": 100, "system": 40, "tools": 10}
+        assert b["total"] == 150
+        assert b["legacy_requests"] == 0
+
+    def test_legacy_entries_counted_separately(self, _log_dir):
+        from awerouter.logging import append
+        append(_log("t1", "default", 120, "flash",
+                    tokens={"messages": 80, "system": 40}))
+        append(_log("t2", "default", 50, "flash"))  # no breakdown (pre-feature)
+        b = token_breakdown()
+        assert b["requests"] == 1
+        assert b["by_type"] == {"messages": 80, "system": 40}
+        assert b["legacy_requests"] == 1
+        assert b["legacy_tokens"] == 50
+
+    def test_since_and_profile_filters(self, _log_dir):
+        from awerouter.logging import append
+        append(_log("2026-08-10T00:00:00+00:00", "default", 100, "flash",
+                    profile="cc-1", tokens={"messages": 100}))
+        append(_log("2026-08-16T00:00:00+00:00", "default", 50, "flash",
+                    profile="cc-2", tokens={"system": 50}))
+        cutoff = datetime(2026, 8, 15, tzinfo=timezone.utc)
+        b = token_breakdown(cutoff, "cc-2")
+        assert b["by_type"] == {"system": 50}
+
+    def test_tail_roundtrips_tokens(self, _log_dir):
+        from awerouter.logging import append
+        append(_log("t1", "default", 120, "flash",
+                    tokens={"messages": 80, "system": 40}))
+        entries = tail(10)
+        assert entries[0].tokens == {"messages": 80, "system": 40}
 
 
 class TestCadence:

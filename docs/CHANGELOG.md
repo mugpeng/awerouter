@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- `awerouter usage tokens [--since] [--profile]`: input-token totals and share by content type (messages, system prompt, tool definitions, tool results, tool-call arguments, thinking). Entries logged before per-type counting are reported separately as not itemized.
+- `awerouter usage log --tokens`: per-entry view that swaps the status/latency/model-in columns for the per-type token breakdown (`msg/sys/tools/results/calls/think`).
+
+### Changed
+- Requests are now logged with a per-type `tokens` breakdown; `token_count` is the sum of the per-type estimates (each with a 1-token floor), so totals may differ from v0.3.7's single-pass estimate by a few tokens per request. Routing semantics unchanged.
+
 ## v0.3.7 - 2026-08-17
 
 ### Changed

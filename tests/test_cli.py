@@ -238,6 +238,7 @@ class TestUsage:
             label="default", destination="flash", provider="stepfun",
             model_out="sf-flash", status=200, ms=800, duration_ms=1500, bytes=100,
             token_count=120, profile="cc-1", protocol="anthropic", agent="claude-code",
+            tokens={"messages": 80, "system": 30, "tools": 10},
         ))
 
     def test_bare_usage_shows_help(self, tmp_path, monkeypatch):
@@ -275,6 +276,35 @@ class TestUsage:
         assert r.exit_code == 0, r.output
         assert "sf-flash" in r.output
         assert "tokens=120" in r.output
+
+    def test_log_tokens_flag(self, tmp_path, monkeypatch):
+        _setup(tmp_path, monkeypatch, _providers(), _routing())
+        self._seed_log(tmp_path, monkeypatch)
+        r = CliRunner().invoke(cli, ["usage", "log", "--tokens"])
+        assert r.exit_code == 0, r.output
+        assert "msg=80" in r.output
+        assert "sys=30" in r.output
+        assert "tools=10" in r.output
+        assert "status=" not in r.output
+        assert "in=auto" not in r.output
+
+    def test_tokens_subcommand(self, tmp_path, monkeypatch):
+        _setup(tmp_path, monkeypatch, _providers(), _routing())
+        self._seed_log(tmp_path, monkeypatch)
+        r = CliRunner().invoke(cli, ["usage", "tokens"])
+        assert r.exit_code == 0, r.output
+        assert "input tokens by type (1 requests" in r.output
+        assert "messages" in r.output and "80" in r.output
+        assert "system" in r.output and "30" in r.output
+        assert "tools" in r.output and "10" in r.output
+        assert "avg 80/req" in r.output
+
+    def test_tokens_no_logs(self, tmp_path, monkeypatch):
+        _setup(tmp_path, monkeypatch)
+        monkeypatch.setenv("AWEROUTER_LOG_DIR", str(tmp_path / "empty"))
+        r = CliRunner().invoke(cli, ["usage", "tokens"])
+        assert r.exit_code == 0
+        assert "(no logs yet)" in r.output
 
     def test_clean_confirmed_removes_log(self, tmp_path, monkeypatch):
         _setup(tmp_path, monkeypatch, _providers(), _routing())

@@ -82,7 +82,7 @@ Rules:
 
 ## Logging
 
-Requests append one JSONL line to `~/.local/state/awerouter/requests.jsonl` (override with `AWEROUTER_LOG_DIR`; rotate at `AWEROUTER_LOG_MAX_BYTES`, default 50 MB). Entries include `request_id`, `profile`, label, destination, status, and the L3 request-token estimate. Log every completed request — even client disconnects and 502s — because `stats` and `calibrate` are only as honest as the log.
+Requests append one JSONL line to `~/.local/state/awerouter/requests.jsonl` (override with `AWEROUTER_LOG_DIR`; rotate at `AWEROUTER_LOG_MAX_BYTES`, default 50 MB). Entries include `request_id`, `profile`, label, destination, status, the L3 request-token estimate, and its per-type `tokens` breakdown (sum equals `token_count`). Log every completed request — even client disconnects and 502s — because `stats` and `calibrate` are only as honest as the log.
 
 ## Documentation
 

@@ -120,10 +120,25 @@ class TestExtractAnthropic:
                 {"role": "user", "content": [{"type": "tool_result", "content": "answer data"}]},
             ],
         })
-        expected = estimate_tokens(" ".join([
-            "sys prompt", "question", "answer data", json.dumps(tools, ensure_ascii=False),
-        ]))
-        assert r.token_count == expected
+        assert r.token_breakdown["system"] == estimate_tokens("sys prompt")
+        assert r.token_breakdown["messages"] == estimate_tokens("question")
+        assert r.token_breakdown["tool_results"] == estimate_tokens("answer data")
+        assert r.token_breakdown["tools"] == estimate_tokens(json.dumps(tools, ensure_ascii=False))
+        assert r.token_count == sum(r.token_breakdown.values())
+
+    def test_token_count_is_sum_of_breakdown(self):
+        r = extract("anthropic", {
+            "system": "sys",
+            "tools": [{"name": "t"}],
+            "messages": [{"content": [
+                {"type": "text", "text": "hello"},
+                {"type": "tool_result", "content": "result"},
+                {"type": "tool_use", "id": "t1", "name": "t", "input": {"x": 1}},
+                {"type": "thinking", "thinking": "hmm"},
+            ]}],
+        })
+        assert set(r.token_breakdown) == {"system", "messages", "tools", "tool_results", "tool_calls", "thinking"}
+        assert r.token_count == sum(r.token_breakdown.values())
 
 
 # ---------------------------------------------------------------------------
@@ -175,11 +190,12 @@ class TestExtractOpenAIChat:
             {"role": "system", "content": "sys prompt"},
             {"role": "user", "content": "hi"},
         ]})
-        assert r.token_count == estimate_tokens("sys prompt hi")
+        assert r.token_breakdown["system"] == estimate_tokens("sys prompt")
+        assert r.token_breakdown["messages"] == estimate_tokens("hi")
 
     def test_tool_result_content_counted(self):
         r = extract("openai-chat", {"messages": [{"role": "tool", "content": "tool output"}]})
-        assert r.token_count == estimate_tokens("tool output")
+        assert r.token_breakdown["tool_results"] == estimate_tokens("tool output")
 
     def test_tool_definitions_counted(self):
         tools = [{"type": "function", "function": {"name": "get_weather", "parameters": {}}}]
@@ -232,7 +248,10 @@ class TestExtractOpenAIResponses:
             {"role": "user", "content": "hello"},
         ]})
         assert r.message_count == 1
-        assert r.token_count == 3  # "{} result hello" (15 chars / 4)
+        assert r.token_breakdown["tool_calls"] == 1    # "{}" (2 chars / 4 -> floor 1)
+        assert r.token_breakdown["tool_results"] == 1  # "result" (6 chars / 4)
+        assert r.token_breakdown["messages"] == 1      # "hello" (5 chars / 4)
+        assert r.token_count == 3
 
     def test_builtin_web_search_tool(self):
         r = extract("openai-responses", {"input": [], "tools": [{"type": "web_search"}]})
@@ -259,11 +278,13 @@ class TestExtractOpenAIResponses:
 
     def test_instructions_counted_with_string_input(self):
         r = extract("openai-responses", {"instructions": "be brief", "input": "hi"})
-        assert r.token_count == estimate_tokens("be brief hi")
+        assert r.token_breakdown["system"] == estimate_tokens("be brief")
+        assert r.token_breakdown["messages"] == estimate_tokens("hi")
 
     def test_instructions_counted_with_items(self):
         r = extract("openai-responses", {"instructions": "be brief", "input": [{"role": "user", "content": "hi"}]})
-        assert r.token_count == estimate_tokens("be brief hi")
+        assert r.token_breakdown["system"] == estimate_tokens("be brief")
+        assert r.token_breakdown["messages"] == estimate_tokens("hi")
 
     def test_tool_definitions_counted(self):
         tools = [{"type": "function", "name": "get_weather", "parameters": {"type": "object"}}]

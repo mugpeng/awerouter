@@ -33,7 +33,7 @@ awerouter works best alongside two companion tools:
 - **[aweskill](https://aweskill.webioinfo.top/)** — CLI skill package manager for AI agents. Installs the awerouter skill so your agent can manage routing in natural language.
 - **[aweswitch](https://github.com/Webioinfo01/aweswitch)** — Agent profile switcher. Launches Claude Code, Codex, or OpenCode sessions with a profile that points `BASE_URL` at the awerouter daemon.
 
-aweskill lets the agent **manage** routing; aweswitch lets you **launch** sessions through it. Configure awerouter once, then start any agent against it with `aweswitch <profile>`.
+aweskill lets the agent **manage** routing by operating skills; aweswitch lets you **launch** sessions through it. Configure awerouter once, then start any agent against it with `aweswitch <profile>`.
 
 ## Install & Usage
 
@@ -222,14 +222,17 @@ awerouter config show [PROFILE]       # redacted config; PROFILE = its providers
 awerouter config edit [providers|routing]  # open one file in $EDITOR (backs up to .bak first)
 awerouter usage stats [--since ..] [--profile ..]
 awerouter usage clean                 # delete saved request logs (asks to confirm)
-awerouter usage log [--lines 20] [--all] [--since ..] [--profile ..]
+awerouter usage log [--lines 20] [--all] [--tokens] [--since ..] [--profile ..]
+awerouter usage tokens [--since ..] [--profile ..]
 awerouter usage calibrate [--since ..] [--profile ..]
 awerouter usage savings [--since ..] [--profile ..]
 ```
 
 All `usage` subcommands read the same request log. `log`, `stats`, `calibrate`, and `savings` take `--since` (`today`, `yesterday`, `7d`, or `YYYY-MM-DD`, local time) and `--profile` directly — e.g. `awerouter usage stats --since today --profile cc-1`; `clean` deletes everything and takes no window options.
 
-`usage stats` aggregates the log per profile (with its wire protocol): label/agent/destination/provider/model breakdowns with percentages, error and fallback counts, latency percentiles (first byte and total) per destination/provider/model, and estimated request tokens (all request content: messages, system prompt, tools, tool I/O). `usage clean` deletes the saved logs (`requests.jsonl` + rotated backup) after a confirmation prompt. `usage log` shows entries verbatim — the last 20 by default, or every entry with `--all`; each line includes the protocol served and the calling agent, detected from the client's `User-Agent` header (`claude-cli/...` → `claude-code`, `codex_cli_rs/...` → `codex`, `opencode/...` → `opencode`).
+`usage stats` aggregates the log per profile (with its wire protocol): label/agent/destination/provider/model breakdowns with percentages, error and fallback counts, latency percentiles (first byte and total) per destination/provider/model, and estimated request tokens (all request content: messages, system prompt, tools, tool I/O). `usage clean` deletes the saved logs (`requests.jsonl` + rotated backup) after a confirmation prompt. `usage log` shows entries verbatim — the last 20 by default, or every entry with `--all`; each line includes the protocol served and the calling agent, detected from the client's `User-Agent` header (`claude-cli/...` → `claude-code`, `codex_cli_rs/...` → `codex`, `opencode/...` → `opencode`). `--tokens` swaps the status/latency/model-in columns for the per-type token breakdown of each request (`msg/sys/tools/results/calls/think`); entries logged before per-type counting show only the total.
+
+`usage tokens` aggregates those per-type breakdowns: input-token totals and share by content type (messages, system prompt, tool definitions, tool results, tool-call arguments, thinking) — useful for seeing how much of a request's tokens are environment constants (system prompt + tool definitions) versus conversation.
 
 `config edit` and the `add` wizard snapshot the target file to `<name>.json.bak` before every write; `awerouter restore [providers|routing]` copies a backup back (with confirmation, then validates the restored config). `config path` prints the two config file paths; `config show [PROFILE]` shows the redacted full config, or just one profile's providers and routing entry.
 

@@ -191,7 +191,17 @@ def _passes_log(entry, cutoff, profile_name) -> bool:
     return True
 
 
-def _usage_log(n, since=None, profile_name=None):
+# Compact per-type labels for `usage log --tokens` lines.
+_TOKEN_SHORT = {
+    "messages": "msg",
+    "system": "sys",
+    "tool_results": "results",
+    "tool_calls": "calls",
+    "thinking": "think",
+}
+
+
+def _usage_log(n, since=None, profile_name=None, tokens_mode=False):
     from awerouter.logging import tail as _tail
     entries = _tail(n)  # n is None => whole file
     if since or profile_name:
@@ -201,13 +211,19 @@ def _usage_log(n, since=None, profile_name=None):
         click.echo("(no logs yet)")
         return
     for e in entries:
-        status_s = str(e.status) if e.status is not None else "-"
-        dur_s = f"/{_fmt_ms(e.duration_ms)}" if e.duration_ms else ""
-        click.echo(
+        head = (
             f"{e.ts}  {e.request_id[:12]:12s}  {e.protocol or '-':16s}  "
             f"{e.agent or '-':12s}  {e.destination:7s}  "
             f"{e.provider:12s}  {e.model_out:24s}  {e.label:14s}  "
-            f"status={status_s:>3}  {_fmt_ms(e.ms)}{dur_s}  "
+        )
+        if tokens_mode:
+            detail = " ".join(f"{_TOKEN_SHORT.get(k, k)}={v}" for k, v in e.tokens.items()) or "-"
+            click.echo(f"{head}tokens={e.token_count}  {detail}")
+            continue
+        status_s = str(e.status) if e.status is not None else "-"
+        dur_s = f"/{_fmt_ms(e.duration_ms)}" if e.duration_ms else ""
+        click.echo(
+            f"{head}status={status_s:>3}  {_fmt_ms(e.ms)}{dur_s}  "
             f"tokens={e.token_count}  in={e.model_in}"
         )
 
@@ -293,12 +309,14 @@ def usage():
 @click.option("--lines", default=20, show_default=True, help="Number of trailing entries to show.")
 @click.option("--all", "show_all", is_flag=True, default=False,
               help="Show every entry instead of the last --lines.")
-def log(lines: int, show_all: bool, since, profile_name):
+@click.option("--tokens", "tokens_mode", is_flag=True, default=False,
+              help="Show per-type token columns instead of status/latency/model-in.")
+def log(lines: int, show_all: bool, tokens_mode: bool, since, profile_name):
     """Show request log entries verbatim (last 20, or --all).
 
     Last --lines by default; --all shows every entry.
     """
-    _usage_log(None if show_all else lines, since, profile_name)
+    _usage_log(None if show_all else lines, since, profile_name, tokens_mode)
 
 
 @usage.command()
@@ -307,6 +325,17 @@ def log(lines: int, show_all: bool, since, profile_name):
 def stats(since, profile_name):
     """Routing summary, grouped by profile."""
     _usage_stats(since, profile_name)
+
+
+_TOKEN_TYPE_ORDER = ("messages", "system", "tools", "tool_results", "tool_calls", "thinking")
+
+
+@usage.command()
+@_since_opt
+@_profile_opt
+def tokens(since, profile_name):
+    """Input-token totals by content type (messages, system, tools, tool I/O)."""
+    _usage_tokens(since, profile_name)
 
 
 @usage.command()
@@ -364,6 +393,28 @@ def _usage_stats(since, profile_name):
         for k, v in sorted(p["by_model"].items()):
             pct = round(100 * v / p["requests"]) if p["requests"] else 0
             click.echo(f"    {k:24s} {v} ({pct}%){_lat_suffix(lat.get('model', {}).get(k))}")
+
+
+def _usage_tokens(since, profile_name):
+    from awerouter.logging import token_breakdown
+    cutoff = _window_cutoff(since, profile_name)
+    b = token_breakdown(cutoff, profile_name)
+    if not b:
+        click.echo("(no logs yet)")
+        return
+    n, total = b["requests"], b["total"]
+    click.echo(f"input tokens by type ({n} requests, all request content):")
+    keys = [k for k in _TOKEN_TYPE_ORDER if k in b["by_type"]]
+    keys += [k for k in b["by_type"] if k not in _TOKEN_TYPE_ORDER]
+    for k in keys:
+        v = b["by_type"][k]
+        pct = round(100 * v / total) if total else 0
+        click.echo(f"  {k:13s} {v:>11,}  {pct:>3}%  avg {v // max(n, 1):,}/req")
+    if b["legacy_requests"]:
+        click.echo(
+            f"  ({b['legacy_requests']} pre-breakdown entries, "
+            f"{b['legacy_tokens']:,} tokens not itemized)"
+        )
 
 
 @usage.command()

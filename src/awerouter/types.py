@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 
@@ -45,6 +45,9 @@ class InspectResult:
     has_image: bool
     has_web_search: bool
     message_count: int
+    # Per-content-type token estimate (system/messages/tools/tool_results/
+    # tool_calls/thinking); sum equals token_count. Empty types omitted.
+    token_breakdown: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -72,3 +75,4 @@ class RequestLog:
     duration_ms: int = 0                      # full request duration incl. streaming (0 = not recorded)
     protocol: str = ""                        # wire protocol served (anthropic / openai-chat / openai-responses)
     agent: str = ""                           # normalized client identity from the User-Agent header
+    tokens: dict = field(default_factory=dict)  # per-type input-token breakdown; sum == token_count (pre-breakdown logs: empty)
