@@ -387,6 +387,35 @@ class TestExtractOpenAIResponses:
         ]})
         assert r.file_search_tokens == 0
 
+    def test_shell_wrapped_search_counted(self):
+        """codex wraps searches in exec_command as one compound cmd string
+        (captured from codex 0.147 traffic); any search segment qualifies."""
+        cmd = ("echo '--- rg matches ---'; rg -n --no-heading 'needle' . | sed -E 's/x/y/'; "
+               "echo '--- files ---'; find . -type f -name '*.txt'")
+        output = "Chunk ID: e68e3e\nOutput:\n./src/f1.txt:2\n./src/f2.txt:2"
+        r = extract("openai-responses", {"input": [
+            {"type": "function_call", "call_id": "c1", "name": "exec_command",
+             "arguments": json.dumps({"cmd": cmd, "yield_time_ms": 1000})},
+            {"type": "function_call_output", "call_id": "c1", "output": output},
+        ]})
+        assert r.file_search_tokens == estimate_tokens(output)
+
+    def test_shell_env_prefixed_and_path_binary_counted(self):
+        r = extract("openai-responses", {"input": [
+            {"type": "function_call", "call_id": "c1", "name": "exec_command",
+             "arguments": json.dumps({"cmd": "FOO=1 /usr/bin/rg -n x . && git grep -l y"})},
+            {"type": "function_call_output", "call_id": "c1", "output": "hits"},
+        ]})
+        assert r.file_search_tokens == estimate_tokens("hits")
+
+    def test_shell_non_search_command_not_counted(self):
+        r = extract("openai-responses", {"input": [
+            {"type": "function_call", "call_id": "c1", "name": "exec_command",
+             "arguments": json.dumps({"cmd": "cargo build --release; echo done"})},
+            {"type": "function_call_output", "call_id": "c1", "output": "Compiling..."},
+        ]})
+        assert r.file_search_tokens == 0
+
 
 def test_extract_unknown_protocol_raises():
     with pytest.raises(ValueError):

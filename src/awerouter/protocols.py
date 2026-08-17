@@ -62,13 +62,60 @@ TOKEN_TYPES = ("system", "messages", "tools", "tool_results", "tool_calls", "thi
 # prose the model must reason over). L3 weighs their tokens against the
 # threshold at a discount — see effective_tokens. Names match
 # case-insensitively: claude-code sends Grep/Glob/LS, opencode sends
-# grep/glob/list (its directory listing). Blind spot: agents that wrap
-# searches in a shell tool (Codex) expose no tool name to match.
+# grep/glob/list (its directory listing).
 _FILE_SEARCH_TOOLS = frozenset({"grep", "glob", "ls", "list"})
 
 
 def _is_file_search(name) -> bool:
     return isinstance(name, str) and name.lower() in _FILE_SEARCH_TOOLS
+
+
+# Shell-exec tool names whose command text decides search-ness. Codex wraps
+# searches here instead of exposing per-purpose tools (0.147: exec_command;
+# older builds: shell); the command lives in arguments "cmd" as one compound
+# shell string, e.g. "echo ..; rg -n x . | sed ..; find . -name y".
+_SHELL_TOOLS = frozenset({"exec_command", "shell"})
+_SEARCH_BINARIES = frozenset({"rg", "grep", "find", "fd", "fdfind", "ls", "ag", "ack"})
+
+
+def _is_search_command(cmd) -> bool:
+    """True if any segment of a compound shell command is a file search.
+
+    Segments split on ;/&&/||, each reduced to its pipeline head (text before
+    the first |) with leading FOO=bar env assignments stripped; any head whose
+    first word is a search binary qualifies — codex prefixes real work with
+    echo banners, so "first segment" would miss it.
+    """
+    if not isinstance(cmd, str) or not cmd.strip():
+        return False
+    for segment in re.split(r";|&&|\|\|", cmd):
+        head = segment.split("|", 1)[0].strip()
+        if not head:
+            continue
+        words = head.split()
+        while words and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", words[0]):
+            words.pop(0)
+        if not words:
+            continue
+        first = words[0].rsplit("/", 1)[-1]
+        if first in _SEARCH_BINARIES:
+            return True
+        if first == "git" and len(words) > 1 and words[1] == "grep":
+            return True
+    return False
+
+
+def _shell_is_search(name, arguments) -> bool:
+    """A shell-tool call counts as file search when its command says so."""
+    if not isinstance(name, str) or name.lower() not in _SHELL_TOOLS:
+        return False
+    try:
+        args = json.loads(arguments) if isinstance(arguments, str) else arguments
+    except json.JSONDecodeError:
+        return False
+    if not isinstance(args, dict):
+        return False
+    return _is_search_command(args.get("cmd") or args.get("command"))
 
 
 def effective_tokens(token_count: int, file_search_tokens: int, discount: float = 0.3) -> int:
@@ -274,7 +321,7 @@ def _extract_openai_responses(body: dict) -> InspectResult:
         )
     has_image = False
     message_count = 0
-    tool_names: dict = {}   # call_id -> name
+    search_calls: dict = {}   # call_id -> output counts as file search
     search_texts: list[str] = []
     for item in input_value or []:
         if not isinstance(item, dict):
@@ -284,11 +331,14 @@ def _extract_openai_responses(body: dict) -> InspectResult:
             itype = item.get("type")
             if itype == "function_call":
                 b["tool_calls"].append(item.get("arguments") or "")
-                tool_names[item.get("call_id")] = item.get("name")
+                search_calls[item.get("call_id")] = (
+                    _is_file_search(item.get("name"))
+                    or _shell_is_search(item.get("name"), item.get("arguments"))
+                )
             elif itype == "function_call_output":
                 text = _block_text(item.get("output"))
                 b["tool_results"].append(text)
-                if _is_file_search(tool_names.get(item.get("call_id"))):
+                if search_calls.get(item.get("call_id")):
                     search_texts.append(text)
             elif itype == "reasoning":
                 b["thinking"].append(_block_text(item.get("summary")))
