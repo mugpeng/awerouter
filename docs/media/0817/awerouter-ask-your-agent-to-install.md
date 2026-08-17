@@ -1,10 +1,18 @@
 # awerouter: I Let My Agent Set Up a Traffic Cop
 
-![awerouter](../../logo/logo.png)
+![awerouter](../../../logo/logo.png)
 
-I told my agent: *"Read https://github.com/mugpeng/awerouter/blob/main/README.ai.md and follow it."* Then I went to get a coffee.
+Here is the uncomfortable math of coding agents: every request goes to the same model. The ten-line refactor, the rename across five files, the "fix this typo" — all of it hits your frontier provider at frontier prices. But most of what an agent does in a day is routine. The requests that genuinely need a strong model — the 12,000-token concurrency bug, the image analysis, anything involving web search — are the minority. You are paying pro prices for flash work.
 
-When I came back, awerouter was installed, the skill was registered, two config files sat in `~/.config/awerouter/`, and the env vars were in `~/.zshrc`. It had read the template configs, set up three providers — StepFun for cheap flash work, Anthropic for pro, and an OpenAI-compatible one for Codex sessions — and wired them into a routing profile.
+awerouter's answer is smart routing. You configure two provider-models per routing profile: a **flash** destination — fast and cheap — for the high-frequency, lightweight tasks, and a **pro** destination — strong and accurate — for complex reasoning and critical decisions. Each request is routed the moment it arrives, decided from the structure of the request itself. No keywords. No LLM classifier. No extra tokens spent on deciding.
+
+awerouter was born out of this exact frustration. And it makes a second bet on top of the first: a router is only useful if someone configures and maintains it — thresholds to tune, providers to add, usage to interpret. That someone does not have to be you. awerouter is built as a tool for the AI age: operable end-to-end by an AI agent. It ships with a README the agent reads, a skill the agent uses, and a CLI the agent runs. The learning cost of the tool moves from you to the agent. You say what you want; the agent figures out how.
+
+Then I let my agent set the whole thing up.
+
+I told it: *"Read https://github.com/mugpeng/awerouter/blob/main/README.ai.md and follow it."* Then I went to get a coffee.
+
+When I came back, awerouter was installed, the skill was registered, two config files sat in `~/.config/awerouter/`, and the env vars were in `~/.zshrc`. It had read the template configs, set up three providers — StepFun for cheap flash work, Anthropic for pro, and an OpenAI-compatible one for Opencode sessions — and wired them into a routing profile.
 
 Then it said: *"Run `awerouter serve` in your terminal. I will not start the daemon for you."*
 
