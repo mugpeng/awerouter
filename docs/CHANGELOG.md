@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.3.6 - 2026-08-17
+
+### Changed
+- Python 3.9 compatibility fix: added `from __future__ import annotations` to `config.py`, `logging.py`, `server.py`, and `router.py` so PEP 604 union syntax (`int | None`) works at runtime on 3.9.
+- Test compatibility: relaxed bare `awerouter usage` help assertion to accept click 8.1's exit 0.
+
+### Added
+- Project logo added to README header (`logo/logo.png`).
+
 ## v0.3.5 - 2026-08-17
 
 ### Changed
