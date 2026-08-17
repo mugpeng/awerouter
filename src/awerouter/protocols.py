@@ -60,9 +60,15 @@ TOKEN_TYPES = ("system", "messages", "tools", "tool_results", "tool_calls", "thi
 
 # File-search tools whose results inflate context cheaply (match lists, not
 # prose the model must reason over). L3 weighs their tokens against the
-# threshold at a discount — see effective_tokens. Blind spot: agents that
-# wrap searches in a shell tool (Codex) expose no tool name to match.
-_FILE_SEARCH_TOOLS = frozenset({"Grep", "Glob", "LS"})
+# threshold at a discount — see effective_tokens. Names match
+# case-insensitively: claude-code sends Grep/Glob/LS, opencode sends
+# grep/glob/list (its directory listing). Blind spot: agents that wrap
+# searches in a shell tool (Codex) expose no tool name to match.
+_FILE_SEARCH_TOOLS = frozenset({"grep", "glob", "ls", "list"})
+
+
+def _is_file_search(name) -> bool:
+    return isinstance(name, str) and name.lower() in _FILE_SEARCH_TOOLS
 
 
 def effective_tokens(token_count: int, file_search_tokens: int, discount: float = 0.3) -> int:
@@ -149,7 +155,7 @@ def _extract_anthropic(body: dict) -> InspectResult:
                 elif btype == "tool_result":
                     text = _block_text(block.get("content"))
                     b["tool_results"].append(text)
-                    if tool_names.get(block.get("tool_use_id")) in _FILE_SEARCH_TOOLS:
+                    if _is_file_search(tool_names.get(block.get("tool_use_id"))):
                         search_texts.append(text)
                 elif btype == "tool_use":
                     b["tool_calls"].append(_tool_use_input_text(block.get("input")))
@@ -198,7 +204,7 @@ def _extract_openai_chat(body: dict) -> InspectResult:
         else:
             bucket = b["messages"]
         is_search_result = (
-            role == "tool" and tool_names.get(msg.get("tool_call_id")) in _FILE_SEARCH_TOOLS
+            role == "tool" and _is_file_search(tool_names.get(msg.get("tool_call_id")))
         )
         content = msg.get("content")
         if isinstance(content, str):
@@ -282,7 +288,7 @@ def _extract_openai_responses(body: dict) -> InspectResult:
             elif itype == "function_call_output":
                 text = _block_text(item.get("output"))
                 b["tool_results"].append(text)
-                if tool_names.get(item.get("call_id")) in _FILE_SEARCH_TOOLS:
+                if _is_file_search(tool_names.get(item.get("call_id"))):
                     search_texts.append(text)
             elif itype == "reasoning":
                 b["thinking"].append(_block_text(item.get("summary")))

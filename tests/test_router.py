@@ -240,6 +240,18 @@ class TestExtractOpenAIChat:
         ]})
         assert r.file_search_tokens == estimate_tokens("a.py\nb.py")
 
+    def test_file_search_names_match_case_insensitive(self):
+        """opencode sends lowercase names (grep/glob/list)."""
+        r = extract("openai-chat", {"messages": [
+            {"role": "assistant", "tool_calls": [
+                {"id": "c1", "function": {"name": "grep", "arguments": "{}"}},
+                {"id": "c2", "function": {"name": "list", "arguments": "{}"}},
+            ]},
+            {"role": "tool", "tool_call_id": "c1", "content": "hits"},
+            {"role": "tool", "tool_call_id": "c2", "content": "files"},
+        ]})
+        assert r.file_search_tokens == estimate_tokens("hits files")
+
     def test_non_search_tool_result_not_measured(self):
         r = extract("openai-chat", {"messages": [
             {"role": "assistant", "tool_calls": [
