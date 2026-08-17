@@ -244,7 +244,8 @@ class TestUsage:
         _setup(tmp_path, monkeypatch, _providers(), _routing())
         self._seed_log(tmp_path, monkeypatch)
         r = CliRunner().invoke(cli, ["usage"])
-        assert r.exit_code != 0, r.output
+        # click <8.2 shows help and exits 0; click >=8.2 exits 2 — support both
+        assert r.exit_code in (0, 2), r.output
         assert "Usage:" in r.output
         assert "total_requests" not in r.output  # no default view
 

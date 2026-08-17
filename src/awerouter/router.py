@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """Request router.
 
 Three-layer first-match-wins pipeline over a precomputed InspectResult
@@ -9,6 +7,8 @@ Three-layer first-match-wins pipeline over a precomputed InspectResult
   L2 Tier label match  — backgroundModel / thinkModel exact-match
   L3 Difficulty score  — long context / image -> pro; default -> flash (cost-first)
 """
+
+from __future__ import annotations
 
 from awerouter.types import Destination, InspectResult, ResolveResult
 

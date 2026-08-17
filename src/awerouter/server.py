@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """awerouter — smart LLM router daemon.
 
 Routes coding-agent requests to flash (cheap/fast) or pro (strong/accurate)
@@ -7,6 +5,8 @@ providers based on structural request signals. Same-protocol passthrough
 proxy (anthropic / openai-chat / openai-responses); no translation, no
 request body parsing on the response path.
 """
+
+from __future__ import annotations
 
 import asyncio
 import errno
