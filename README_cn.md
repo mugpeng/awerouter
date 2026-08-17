@@ -35,31 +35,9 @@ awerouter 与两个配套工具配合最佳：
 
 aweskill 让 agent **管理**路由；aweswitch 让你**启动**走路由的会话。配置一次 awerouter，之后就能用 `aweswitch <profile>` 把任意 agent 启动到它上面。
 
-## 安装
+## 安装与使用
 
-```bash
-pip install awerouter
-```
-
-## 快速开始
-
-```bash
-# 1. 初始化配置（生成 ~/.config/awerouter/{providers,routing}.json）
-awerouter init
-
-# 2. 交互式添加 profile（自动写入两个文件，保证引用一致）
-awerouter add
-#    或者手改：编辑 providers.json 填密钥（${ENV_VAR}），编辑 routing.json 映射 flash/pro
-
-# 3. 启动 daemon（只有一个 profile 时名字可省）
-awerouter serve [cc-router-1]     # 等价简写：awerouter cc-router-1
-
-# 4. 让 CC 指向它 —— serve 启动横幅会直接打印下面这两行
-export ANTHROPIC_BASE_URL=http://127.0.0.1:20128
-# aweswitch profile 环境变量：ANTHROPIC_MODEL=auto, _HAIKU_=flash, _OPUS_=pro
-```
-
-## 让 AI agent 配置
+### 让 AI agent 安装和配置
 
 如果你在 Claude Code、Codex、Cursor 等 coding agent 中工作，直接告诉它：
 
@@ -82,7 +60,7 @@ Agent 可以直接运行只读命令（`list`、`config show`、`usage stats`、
 awerouter serve cc-router-1
 ```
 
-### awerouter skill
+#### awerouter skill
 
 通过 [aweskill](https://aweskill.webioinfo.top/) 安装 [awerouter skill](https://github.com/mugpeng/awerouter/blob/main/resources/skills/awerouter/SKILL.md)，可以让 AI agent 用自然语言管理路由：
 
@@ -93,7 +71,7 @@ awerouter serve cc-router-1
 
 安装后你可以直接告诉 agent："给 openai-chat 分组加一个 GLM provider"、"把 longContextThreshold 调到 12000"、"看看我的 web_search 流量走哪个 provider"，agent 会读取配置、做修改、用 `awerouter config show` / `awerouter list` 验证。
 
-### 通过 aweswitch 启动
+#### 通过 aweswitch 启动
 
 awerouter 配置好后，用一个指向 daemon 的 aweswitch profile，就能启动走智能路由的编码 agent。
 
@@ -129,6 +107,32 @@ aweswitch oc-awerouter
 ```
 
 `OPENCODE_MODEL` 设为 `auto` 时，awerouter 按结构信号逐请求路由——上游 provider 收到的是 `routing.json` destinations 里配置的实际 model id，而不是 `auto`。Claude Code 同理，用一个 `anthropic` profile（`ANTHROPIC_MODEL=auto`）即可。
+
+### 手动安装和使用
+
+从 PyPI 安装：
+
+```bash
+pip install awerouter
+```
+
+快速开始：
+
+```bash
+# 1. 初始化配置（生成 ~/.config/awerouter/{providers,routing}.json）
+awerouter init
+
+# 2. 交互式添加 profile（自动写入两个文件，保证引用一致）
+awerouter add
+#    或者手改：编辑 providers.json 填密钥（${ENV_VAR}），编辑 routing.json 映射 flash/pro
+
+# 3. 启动 daemon（只有一个 profile 时名字可省）
+awerouter serve [cc-router-1]     # 等价简写：awerouter cc-router-1
+
+# 4. 让 CC 指向它 —— serve 启动横幅会直接打印下面这两行
+export ANTHROPIC_BASE_URL=http://127.0.0.1:20128
+# aweswitch profile 环境变量：ANTHROPIC_MODEL=auto, _HAIKU_=flash, _OPUS_=pro
+```
 
 ## 配置
 
@@ -200,7 +204,7 @@ aweswitch oc-awerouter
 |----|------|------|
 | L1 能力护栏 | body 含 `web_search` 工具 | `settings.webSearchModel`（默认 **pro**） |
 | L2 档位匹配 | `model == c1/flash` 或 `c1/think` | flash / pro |
-| L3 难度评分 | token 超阈值，或含图片 | **pro**；否则 **flash** |
+| L3 难度评分 | token（全部请求内容）超阈值，或含图片 | **pro**；否则 **flash** |
 
 CC 的 `/model` 选择器设置 tier model id（c1/flash / c1/pro / c1/think）。awerouter 直接读取该字段做路由——不猜语义、不用关键词、不跑分类器。
 
@@ -225,13 +229,13 @@ awerouter usage savings
 
 所有 `usage` 子命令读的是同一份请求日志；窗口选项放在 `usage` 和子命令之间（`awerouter usage --since today savings`）。
 
-`usage stats` 按 profile 汇总：label/destination/provider/model 分组（带百分比）、错误与降级计数、各 destination/provider/model 的延迟分位数（首字节与总时长）、估算 message tokens。`--since` 接受 `today`、`yesterday`、`7d` 或 `YYYY-MM-DD`（本地时间）；`--profile` 只看单个 profile。`usage clean` 确认后删除已保存的日志（`requests.jsonl` 及轮转备份）。`usage log` 原样显示条目——默认最后 20 条，加 `--all` 显示全部。
+`usage stats` 按 profile 汇总：label/destination/provider/model 分组（带百分比）、错误与降级计数、各 destination/provider/model 的延迟分位数（首字节与总时长）、估算请求 token（全部请求内容：messages、system prompt、工具定义与工具 I/O）。`--since` 接受 `today`、`yesterday`、`7d` 或 `YYYY-MM-DD`（本地时间）；`--profile` 只看单个 profile。`usage clean` 确认后删除已保存的日志（`requests.jsonl` 及轮转备份）。`usage log` 原样显示条目——默认最后 20 条，加 `--all` 显示全部。
 
 `config edit` 和 `add` 向导在每次写入前把目标文件快照为 `<名称>.json.bak`；`awerouter restore [providers|routing]` 确认后把备份拷回并校验恢复后的配置。`config path` 打印两个配置文件路径；`config show [PROFILE]` 显示脱敏全量配置，或单个 profile 用到的 provider 与路由条目。
 
-`usage calibrate` 展示 L3 流量（受阈值影响的层）的消息 token 分布（仅统计 messages，不含 system prompt 与 tools 定义），并在 p90/p95/p99 处建议 `longContextThreshold` 候选值。跑一段真实流量后执行，再编辑 `routing.json`。
+`usage calibrate` 展示 L3 流量（受阈值影响的层）的请求 token 分布（统计全部请求内容：messages、system prompt、工具定义与工具 I/O），并在 p90/p95/p99 处建议 `longContextThreshold` 候选值。跑一段真实流量后执行，再编辑 `routing.json`。
 
-`usage savings` 是 token 记账视图：各档消化了多少输入消息 token、相对「全部直连 pro」的基线卸载了多少 pro 输入 token。cache sensitivity 小节给出卸载量的上下界（Anthropic 体系按缓存读 ~0.1×、写 ~1.25×、TTL 5 分钟折算），并展示你的换档节奏与 TTL 的关系——pro-only 基线若缓存常热，那些 token 本会按缓存读价计费。输出末尾给出代入式金额公式（token 数为实测值）——把你的输入单价（每百万 token）代入 pro/flash 即可直接算出节省金额（输出 token、flash 侧缓存、能力错配导致的额外轮次均未建模）。
+`usage savings` 是 token 记账视图：各档消化了多少输入请求 token、相对「全部直连 pro」的基线卸载了多少 pro 输入 token。cache sensitivity 小节给出卸载量的上下界（Anthropic 体系按缓存读 ~0.1×、写 ~1.25×、TTL 5 分钟折算），并展示你的换档节奏与 TTL 的关系——pro-only 基线若缓存常热，那些 token 本会按缓存读价计费。输出末尾给出代入式金额公式（token 数为实测值）——把你的输入单价（每百万 token）代入 pro/flash 即可直接算出节省金额（输出 token、flash 侧缓存、能力错配导致的额外轮次均未建模）。
 
 ## 故障排查
 

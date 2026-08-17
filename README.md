@@ -35,31 +35,9 @@ awerouter works best alongside two companion tools:
 
 aweskill lets the agent **manage** routing; aweswitch lets you **launch** sessions through it. Configure awerouter once, then start any agent against it with `aweswitch <profile>`.
 
-## Install
+## Install & Usage
 
-```bash
-pip install awerouter
-```
-
-## Quick Start
-
-```bash
-# 1. Init config (creates ~/.config/awerouter/{providers,routing}.json)
-awerouter init
-
-# 2. Interactively add a profile (writes both files, references stay consistent)
-awerouter add
-#    or edit by hand: providers.json for keys (${ENV_VAR}), routing.json for flash/pro
-
-# 3. Start the daemon (profile name optional when only one exists)
-awerouter serve [cc-router-1]     # shorthand: awerouter cc-router-1
-
-# 4. Point CC at it — the serve banner prints both lines below
-export ANTHROPIC_BASE_URL=http://127.0.0.1:20128
-# aweswitch profile env: ANTHROPIC_MODEL=auto, _HAIKU_=flash, _OPUS_=pro
-```
-
-## Let AI Agent Configure
+### Let AI agent install and configure
 
 If you are working in Claude Code, Codex, Cursor, or another coding agent, tell it:
 
@@ -82,7 +60,7 @@ The agent can run read-only commands (`list`, `config show`, `usage stats`, `usa
 awerouter serve cc-router-1
 ```
 
-### awerouter skill
+#### awerouter skill
 
 Install the [awerouter skill](https://github.com/mugpeng/awerouter/blob/main/resources/skills/awerouter/SKILL.md) via [aweskill](https://aweskill.webioinfo.top/) to let AI agents manage routing with natural language:
 
@@ -93,7 +71,7 @@ Install the [awerouter skill](https://github.com/mugpeng/awerouter/blob/main/res
 
 After install, you can tell the agent things like "Add a GLM provider for the openai-chat group", "Raise longContextThreshold to 12000", or "Show me which provider handles my web_search traffic". The agent reads the config, makes changes, and verifies with `awerouter config show` / `awerouter list`.
 
-### Launch through aweswitch
+#### Launch through aweswitch
 
 Once awerouter is configured, launch any agent through it by pointing an aweswitch profile at the daemon.
 
@@ -129,6 +107,32 @@ aweswitch oc-awerouter
 ```
 
 With `OPENCODE_MODEL` set to `auto`, awerouter routes each request by structural signals — the upstream provider receives the actual model id from `routing.json` destinations, not `auto`. Claude Code works the same way via an `anthropic` profile (`ANTHROPIC_MODEL=auto`).
+
+### Manual install and usage
+
+Install from PyPI:
+
+```bash
+pip install awerouter
+```
+
+Quick Start:
+
+```bash
+# 1. Init config (creates ~/.config/awerouter/{providers,routing}.json)
+awerouter init
+
+# 2. Interactively add a profile (writes both files, references stay consistent)
+awerouter add
+#    or edit by hand: providers.json for keys (${ENV_VAR}), routing.json for flash/pro
+
+# 3. Start the daemon (profile name optional when only one exists)
+awerouter serve [cc-router-1]     # shorthand: awerouter cc-router-1
+
+# 4. Point CC at it — the serve banner prints both lines below
+export ANTHROPIC_BASE_URL=http://127.0.0.1:20128
+# aweswitch profile env: ANTHROPIC_MODEL=auto, _HAIKU_=flash, _OPUS_=pro
+```
 
 ## Config
 
@@ -200,7 +204,7 @@ Three-layer first-match-wins pipeline, evaluated per request:
 |-------|--------|----------|
 | L1 Capability | `web_search` tool in body | `settings.webSearchModel` (default **pro**) |
 | L2 Tier label | `model == c1/flash` or `c1/think` | flash / pro respectively |
-| L3 Difficulty | token count > threshold, or has image | **pro**; else **flash** |
+| L3 Difficulty | token count (all request content) > threshold, or has image | **pro**; else **flash** |
 
 CC's `/model` picker sets the tier model id (c1/flash / c1/pro / c1/think). awerouter reads it and routes accordingly — no keyword parsing, no LLM classifier.
 
@@ -225,13 +229,13 @@ awerouter usage savings [--since ..] [--profile ..]
 
 All `usage` subcommands read the same request log. `log`, `stats`, `calibrate`, and `savings` take `--since` (`today`, `yesterday`, `7d`, or `YYYY-MM-DD`, local time) and `--profile` directly — e.g. `awerouter usage stats --since today --profile cc-1`; `clean` deletes everything and takes no window options.
 
-`usage stats` aggregates the log per profile (with its wire protocol): label/agent/destination/provider/model breakdowns with percentages, error and fallback counts, latency percentiles (first byte and total) per destination/provider/model, and estimated message tokens. `usage clean` deletes the saved logs (`requests.jsonl` + rotated backup) after a confirmation prompt. `usage log` shows entries verbatim — the last 20 by default, or every entry with `--all`; each line includes the protocol served and the calling agent, detected from the client's `User-Agent` header (`claude-cli/...` → `claude-code`, `codex_cli_rs/...` → `codex`, `opencode/...` → `opencode`).
+`usage stats` aggregates the log per profile (with its wire protocol): label/agent/destination/provider/model breakdowns with percentages, error and fallback counts, latency percentiles (first byte and total) per destination/provider/model, and estimated request tokens (all request content: messages, system prompt, tools, tool I/O). `usage clean` deletes the saved logs (`requests.jsonl` + rotated backup) after a confirmation prompt. `usage log` shows entries verbatim — the last 20 by default, or every entry with `--all`; each line includes the protocol served and the calling agent, detected from the client's `User-Agent` header (`claude-cli/...` → `claude-code`, `codex_cli_rs/...` → `codex`, `opencode/...` → `opencode`).
 
 `config edit` and the `add` wizard snapshot the target file to `<name>.json.bak` before every write; `awerouter restore [providers|routing]` copies a backup back (with confirmation, then validates the restored config). `config path` prints the two config file paths; `config show [PROFILE]` shows the redacted full config, or just one profile's providers and routing entry.
 
-`usage calibrate` shows the message-token distribution of L3 traffic (the threshold-sensitive layer; messages only — system prompt and tools are excluded) and suggests candidate `longContextThreshold` values at p90/p95/p99. Run it after some real traffic, then edit `routing.json`.
+`usage calibrate` shows the request-token distribution of L3 traffic (the threshold-sensitive layer; all request content — messages, system prompt, tools, tool I/O) and suggests candidate `longContextThreshold` values at p90/p95/p99. Run it after some real traffic, then edit `routing.json`.
 
-`usage savings` is the token accounting view: how many message-input tokens each tier consumed and how many pro input tokens routing offloaded to flash vs a pro-only baseline. A cache-sensitivity section brackets the offload between "all cache reads" and "all full price" (Anthropic-style ~0.1x read / 1.25x write / 5-min TTL) and shows your switch cadence vs the TTL — a cache-warm pro-only baseline would have billed those tokens at cache-read prices. The output ends with ready-to-fill formulas using the measured token counts — substitute your providers' input prices (per 1M tokens) and read off the saved amount (output tokens, flash-side caching, and capability-mismatch turns are not modeled).
+`usage savings` is the token accounting view: how many request-input tokens each tier consumed and how many pro input tokens routing offloaded to flash vs a pro-only baseline. A cache-sensitivity section brackets the offload between "all cache reads" and "all full price" (Anthropic-style ~0.1x read / 1.25x write / 5-min TTL) and shows your switch cadence vs the TTL — a cache-warm pro-only baseline would have billed those tokens at cache-read prices. The output ends with ready-to-fill formulas using the measured token counts — substitute your providers' input prices (per 1M tokens) and read off the saved amount (output tokens, flash-side caching, and capability-mismatch turns are not modeled).
 
 ## Troubleshooting
 
