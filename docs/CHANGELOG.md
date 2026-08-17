@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.3.7 - 2026-08-17
+
+### Changed
+- Token counting now includes system prompt, tool definitions, tool results, tool-call inputs, and thinking blocks across all three protocols. Previously only message prose was counted (and inconsistently across protocols). `longContextThreshold` values need recalibration via `usage calibrate` after upgrading.
+
 ## v0.3.6 - 2026-08-17
 
 ### Changed

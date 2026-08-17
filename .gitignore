@@ -21,3 +21,4 @@ dist/
 
 # Local config (never track real secrets)
 # providers.json / routing.json live in ~/.config/awerouter/, not in this repo.
+.zcode/plans/plan-sess_0fe0caaf-9941-4018-9e88-897bb24cb4f7.md

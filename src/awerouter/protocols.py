@@ -5,6 +5,7 @@ request-side signal extraction and the upstream endpoint path differ. The
 response path is opaque byte passthrough — protocol-agnostic by design.
 """
 
+import json
 import re
 
 from awerouter.types import InspectResult
@@ -48,13 +49,54 @@ def estimate_tokens(text: str) -> int:
 
 
 # ---------------------------------------------------------------------------
-# anthropic: messages[] with text/image content blocks, flat tool names
+# Shared content flatteners. token_count reflects everything in the request
+# that is resent every turn and billed upstream: system prompt, message
+# prose, tool definitions, tool results, tool-call arguments, thinking
+# blocks. Images only set has_image.
+# ---------------------------------------------------------------------------
+
+
+def _block_text(content) -> str:
+    """Text of a content value that is either a plain string or a list of
+    blocks carrying a "text" field (anthropic system/text blocks, tool
+    results, reasoning summaries)."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return " ".join(
+            block.get("text", "") for block in content if isinstance(block, dict)
+        )
+    return ""
+
+
+def _tool_defs_text(tools) -> str:
+    if not tools:
+        return ""
+    return json.dumps(tools, ensure_ascii=False)
+
+
+def _tool_use_input_text(value) -> str:
+    """Tool-call arguments as text: dict (anthropic input) or JSON string
+    (openai-chat / openai-responses arguments)."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        return json.dumps(value, ensure_ascii=False)
+    return ""
+
+
+# ---------------------------------------------------------------------------
+# anthropic: messages[] with text/image/tool_result/tool_use/thinking blocks,
+# system prompt as str or text blocks, flat tool names
 # ---------------------------------------------------------------------------
 
 
 def _extract_anthropic(body: dict) -> InspectResult:
     messages = body.get("messages", [])
-    parts: list[str] = []
+    parts: list[str] = [
+        _block_text(body.get("system")),
+        _tool_defs_text(body.get("tools")),
+    ]
     has_image = False
     for msg in messages:
         content = msg.get("content")
@@ -64,12 +106,19 @@ def _extract_anthropic(body: dict) -> InspectResult:
             for block in content:
                 if not isinstance(block, dict):
                     continue
-                if block.get("type") == "text":
+                btype = block.get("type")
+                if btype == "text":
                     parts.append(block.get("text", ""))
-                elif block.get("type") == "image":
+                elif btype == "image":
                     has_image = True
+                elif btype == "tool_result":
+                    parts.append(_block_text(block.get("content")))
+                elif btype == "tool_use":
+                    parts.append(_tool_use_input_text(block.get("input")))
+                elif btype == "thinking":
+                    parts.append(block.get("thinking", ""))
     return InspectResult(
-        token_count=estimate_tokens(" ".join(parts)),
+        token_count=estimate_tokens(" ".join(p for p in parts if p)),
         has_image=has_image,
         has_web_search=_has_web_search_flat(body),
         message_count=len(messages),
@@ -85,13 +134,15 @@ def _has_web_search_flat(body: dict) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# openai-chat: messages[] with text/image_url parts, nested function tools
+# openai-chat: messages[] with text/image_url parts (system prompt and tool
+# results arrive as message content), nested function tools with string
+# arguments
 # ---------------------------------------------------------------------------
 
 
 def _extract_openai_chat(body: dict) -> InspectResult:
     messages = body.get("messages", [])
-    parts: list[str] = []
+    parts: list[str] = [_tool_defs_text(body.get("tools"))]
     has_image = False
     for msg in messages:
         content = msg.get("content")
@@ -105,8 +156,11 @@ def _extract_openai_chat(body: dict) -> InspectResult:
                     parts.append(part.get("text", ""))
                 elif part.get("type") == "image_url":
                     has_image = True
+        for call in msg.get("tool_calls") or []:
+            if isinstance(call, dict) and isinstance(call.get("function"), dict):
+                parts.append(call["function"].get("arguments") or "")
     return InspectResult(
-        token_count=estimate_tokens(" ".join(parts)),
+        token_count=estimate_tokens(" ".join(p for p in parts if p)),
         has_image=has_image,
         has_web_search=_has_web_search_chat(body),
         message_count=len(messages),
@@ -127,26 +181,40 @@ def _has_web_search_chat(body: dict) -> bool:
 
 # ---------------------------------------------------------------------------
 # openai-responses: input (string | items) with input_text/input_image parts,
-# builtin tool types plus flat function names. Non-message items (reasoning,
-# function_call, function_call_output) carry no text and are skipped.
+# builtin tool types plus flat function names, instructions as system prompt.
+# Non-message items (reasoning, function_call, function_call_output) do not
+# count as messages, but their payloads count toward token_count.
 # ---------------------------------------------------------------------------
 
 
 def _extract_openai_responses(body: dict) -> InspectResult:
     input_value = body.get("input")
+    parts: list[str] = [
+        _block_text(body.get("instructions")),
+        _tool_defs_text(body.get("tools")),
+    ]
     if isinstance(input_value, str):
+        parts.append(input_value)
         return InspectResult(
-            token_count=estimate_tokens(input_value),
+            token_count=estimate_tokens(" ".join(p for p in parts if p)),
             has_image=False,
             has_web_search=_has_web_search_responses(body),
             message_count=1 if input_value else 0,
         )
-    parts: list[str] = []
     has_image = False
     message_count = 0
     for item in input_value or []:
-        content = item.get("content") if isinstance(item, dict) else None
+        if not isinstance(item, dict):
+            continue
+        content = item.get("content")
         if content is None:
+            itype = item.get("type")
+            if itype == "function_call":
+                parts.append(item.get("arguments") or "")
+            elif itype == "function_call_output":
+                parts.append(_block_text(item.get("output")))
+            elif itype == "reasoning":
+                parts.append(_block_text(item.get("summary")))
             continue
         message_count += 1
         if isinstance(content, str):
@@ -160,7 +228,7 @@ def _extract_openai_responses(body: dict) -> InspectResult:
                 elif part.get("type") == "input_image":
                     has_image = True
     return InspectResult(
-        token_count=estimate_tokens(" ".join(parts)),
+        token_count=estimate_tokens(" ".join(p for p in parts if p)),
         has_image=has_image,
         has_web_search=_has_web_search_responses(body),
         message_count=message_count,

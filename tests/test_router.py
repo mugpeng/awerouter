@@ -1,5 +1,7 @@
 """Tests for awerouter.router and per-protocol signal extraction."""
 
+import json
+
 import pytest
 
 from awerouter.protocols import estimate_tokens, extract
@@ -71,6 +73,58 @@ class TestExtractAnthropic:
         assert r.message_count == 0
         assert r.token_count == 0
 
+    def test_system_prompt_counted(self):
+        r = extract("anthropic", {"system": "you are a router", "messages": []})
+        assert r.token_count == estimate_tokens("you are a router")
+
+    def test_system_prompt_blocks_counted(self):
+        r = extract("anthropic", {"system": [{"type": "text", "text": "be brief"}], "messages": []})
+        assert r.token_count == estimate_tokens("be brief")
+
+    def test_tool_definitions_counted(self):
+        tools = [{"name": "get_weather", "input_schema": {"type": "object"}}]
+        r = extract("anthropic", {"messages": [], "tools": tools})
+        assert r.token_count == estimate_tokens(json.dumps(tools, ensure_ascii=False))
+
+    def test_tool_result_counted(self):
+        r = extract("anthropic", {"messages": [{"content": [
+            {"type": "tool_result", "content": "tool output text"},
+        ]}]})
+        assert r.token_count == estimate_tokens("tool output text")
+
+    def test_tool_result_blocks_counted(self):
+        r = extract("anthropic", {"messages": [{"content": [
+            {"type": "tool_result", "content": [{"type": "text", "text": "block output"}]},
+        ]}]})
+        assert r.token_count == estimate_tokens("block output")
+
+    def test_tool_use_input_counted(self):
+        r = extract("anthropic", {"messages": [{"content": [
+            {"type": "tool_use", "id": "t1", "name": "get_weather", "input": {"city": "SF"}},
+        ]}]})
+        assert r.token_count == estimate_tokens('{"city": "SF"}')
+
+    def test_thinking_counted(self):
+        r = extract("anthropic", {"messages": [{"content": [
+            {"type": "thinking", "thinking": "let me consider options"},
+        ]}]})
+        assert r.token_count == estimate_tokens("let me consider options")
+
+    def test_mixed_content_counted(self):
+        tools = [{"name": "get_weather"}]
+        r = extract("anthropic", {
+            "system": "sys prompt",
+            "tools": tools,
+            "messages": [
+                {"role": "user", "content": "question"},
+                {"role": "user", "content": [{"type": "tool_result", "content": "answer data"}]},
+            ],
+        })
+        expected = estimate_tokens(" ".join([
+            "sys prompt", "question", "answer data", json.dumps(tools, ensure_ascii=False),
+        ]))
+        assert r.token_count == expected
+
 
 # ---------------------------------------------------------------------------
 # openai-chat extraction
@@ -116,6 +170,28 @@ class TestExtractOpenAIChat:
         r = extract("openai-chat", {"messages": [{"role": "system", "content": "s"}, {"role": "user", "content": "u"}]})
         assert r.message_count == 2
 
+    def test_system_message_counted(self):
+        r = extract("openai-chat", {"messages": [
+            {"role": "system", "content": "sys prompt"},
+            {"role": "user", "content": "hi"},
+        ]})
+        assert r.token_count == estimate_tokens("sys prompt hi")
+
+    def test_tool_result_content_counted(self):
+        r = extract("openai-chat", {"messages": [{"role": "tool", "content": "tool output"}]})
+        assert r.token_count == estimate_tokens("tool output")
+
+    def test_tool_definitions_counted(self):
+        tools = [{"type": "function", "function": {"name": "get_weather", "parameters": {}}}]
+        r = extract("openai-chat", {"messages": [], "tools": tools})
+        assert r.token_count == estimate_tokens(json.dumps(tools, ensure_ascii=False))
+
+    def test_tool_call_arguments_counted(self):
+        r = extract("openai-chat", {"messages": [{"role": "assistant", "content": None, "tool_calls": [
+            {"id": "c1", "type": "function", "function": {"name": "get_weather", "arguments": '{"city": "SF"}'}},
+        ]}]})
+        assert r.token_count == estimate_tokens('{"city": "SF"}')
+
 
 # ---------------------------------------------------------------------------
 # openai-responses extraction
@@ -147,7 +223,8 @@ class TestExtractOpenAIResponses:
         assert r.has_image is True
 
     def test_non_message_items_skipped(self):
-        """reasoning / function_call items carry no message text; no content -> skipped."""
+        """reasoning / function_call(_output) items are not messages
+        (message_count), but their payloads count toward token_count."""
         r = extract("openai-responses", {"input": [
             {"type": "reasoning", "summary": []},
             {"type": "function_call", "name": "f", "arguments": "{}"},
@@ -155,7 +232,7 @@ class TestExtractOpenAIResponses:
             {"role": "user", "content": "hello"},
         ]})
         assert r.message_count == 1
-        assert r.token_count == 1  # only "hello" (5 chars / 4)
+        assert r.token_count == 3  # "{} result hello" (15 chars / 4)
 
     def test_builtin_web_search_tool(self):
         r = extract("openai-responses", {"input": [], "tools": [{"type": "web_search"}]})
@@ -179,6 +256,37 @@ class TestExtractOpenAIResponses:
         r = extract("openai-responses", {})
         assert r.token_count == 0
         assert r.message_count == 0
+
+    def test_instructions_counted_with_string_input(self):
+        r = extract("openai-responses", {"instructions": "be brief", "input": "hi"})
+        assert r.token_count == estimate_tokens("be brief hi")
+
+    def test_instructions_counted_with_items(self):
+        r = extract("openai-responses", {"instructions": "be brief", "input": [{"role": "user", "content": "hi"}]})
+        assert r.token_count == estimate_tokens("be brief hi")
+
+    def test_tool_definitions_counted(self):
+        tools = [{"type": "function", "name": "get_weather", "parameters": {"type": "object"}}]
+        r = extract("openai-responses", {"input": [], "tools": tools})
+        assert r.token_count == estimate_tokens(json.dumps(tools, ensure_ascii=False))
+
+    def test_function_call_arguments_counted(self):
+        r = extract("openai-responses", {"input": [
+            {"type": "function_call", "name": "f", "arguments": '{"x": 1}'},
+        ]})
+        assert r.token_count == estimate_tokens('{"x": 1}')
+
+    def test_function_call_output_counted(self):
+        r = extract("openai-responses", {"input": [
+            {"type": "function_call_output", "output": "result text"},
+        ]})
+        assert r.token_count == estimate_tokens("result text")
+
+    def test_reasoning_summary_counted(self):
+        r = extract("openai-responses", {"input": [
+            {"type": "reasoning", "summary": [{"type": "summary_text", "text": "chain of thought"}]},
+        ]})
+        assert r.token_count == estimate_tokens("chain of thought")
 
 
 def test_extract_unknown_protocol_raises():
@@ -298,6 +406,7 @@ class TestResolveAcrossProtocols:
 
     def test_web_search_disabled_does_not_force_pro(self):
         body = {"input": "hi", "tools": [{"type": "web_search", "external_web_access": False}]}
-        r = resolve("auto", extract("openai-responses", body), _cfg(), "flash", "think", 8)
+        # threshold 100: tool definitions now count toward tokens, keep L3 out of the way
+        r = resolve("auto", extract("openai-responses", body), _cfg(), "flash", "think", 100)
         assert r.destination == "flash"
         assert r.label == "default"

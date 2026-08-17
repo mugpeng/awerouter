@@ -106,12 +106,12 @@ awerouter evaluates requests in first-match-wins order:
 |-------|--------|--------|
 | L1 | `web_search` tool present | `settings.webSearchModel` (default pro) |
 | L2 | tier model label (`c1/flash`, `c1/think`, or equivalent model mapping) | flash or pro |
-| L3 | long context or image-heavy content | pro if above threshold or image present |
+| L3 | long context (token count over all request content) or image present | pro if above threshold or image present |
 
 Notes:
 - For Anthropic-style clients, tier labels come from the model id mapping.
 - For OpenAI-style clients, tier labels usually do not apply; routing is mostly L1 + L3 with a flash default.
-- `longContextThreshold` is message-token-centric; calibrate from real traffic.
+- `longContextThreshold` compares against all request content (messages, system prompt, tool definitions, tool I/O); calibrate from real traffic.
 
 ## Common Tasks
 

@@ -52,7 +52,7 @@ Claude Code
 awerouter
    ├─ resolve(): L1 capability guard (web_search) → L2 tier label
    │             (backgroundModel/thinkModel) → L3 difficulty
-   │             (message tokens > threshold or image) → else flash
+   │             (request tokens > threshold or image) → else flash
    ├─ rewrite model + auth header, forward to provider
    ├─ pre-stream fallback: flash → pro on 429/408/5xx/network errors
    └─ opaque SSE passthrough (response bytes are never parsed)
@@ -82,7 +82,7 @@ Rules:
 
 ## Logging
 
-Requests append one JSONL line to `~/.local/state/awerouter/requests.jsonl` (override with `AWEROUTER_LOG_DIR`; rotate at `AWEROUTER_LOG_MAX_BYTES`, default 50 MB). Entries include `request_id`, `profile`, label, destination, status, and the L3 message-token estimate. Log every completed request — even client disconnects and 502s — because `stats` and `calibrate` are only as honest as the log.
+Requests append one JSONL line to `~/.local/state/awerouter/requests.jsonl` (override with `AWEROUTER_LOG_DIR`; rotate at `AWEROUTER_LOG_MAX_BYTES`, default 50 MB). Entries include `request_id`, `profile`, label, destination, status, and the L3 request-token estimate. Log every completed request — even client disconnects and 502s — because `stats` and `calibrate` are only as honest as the log.
 
 ## Documentation
 

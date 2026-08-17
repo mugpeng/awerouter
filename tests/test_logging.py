@@ -124,7 +124,7 @@ class TestStats:
         assert "(unknown)" in s["by_profile"]
 
     def test_flash_offload_counts_flash_only(self, _log_dir):
-        """flash_tokens sums message tokens of flash-served requests (the
+        """flash_tokens sums request tokens of flash-served requests (the
         pro-input a single-pro setup would have billed)."""
         from awerouter.logging import append
         append(_log("t1", "default", 100, "flash"))           # counts

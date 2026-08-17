@@ -331,7 +331,7 @@ def _usage_stats(since, profile_name):
         click.echo("(no logs yet)")
         return
     click.echo(f"total_requests : {s['total_requests']}")
-    click.echo(f"~total_tokens  : {s['total_tokens']}  (messages only — system prompt & tools excluded)")
+    click.echo(f"~total_tokens  : {s['total_tokens']}  (all request content: messages, system prompt, tools, tool I/O)")
     err_pct = round(100 * s["errors"] / s["total_requests"]) if s["total_requests"] else 0
     click.echo(f"errors         : {s['errors']} ({err_pct}%)")
     click.echo(f"fallbacks      : {s['fallbacks']}  (flash failed -> pro)")
@@ -340,7 +340,7 @@ def _usage_stats(since, profile_name):
             f"pro input offloaded to flash: ~{s['flash_tokens']} tokens "
             f"across {s['flash_requests']} requests"
         )
-        click.echo("  (message tokens only — system prompt & tools excluded; conservative)")
+        click.echo("  (input-side estimate; output tokens are not visible to the proxy)")
     for name, p in sorted(s["by_profile"].items()):
         click.echo()
         extras = (f", {p['errors']} error{'s' if p['errors'] != 1 else ''}"
@@ -381,8 +381,8 @@ def calibrate(since, profile_name):
     if not d:
         click.echo("(no L3 traffic yet — run some non-background/think requests first)")
         return
-    click.echo(f"L3 message-token distribution ({d['n']} requests):")
-    click.echo("  (messages only — system prompt and tools definitions are excluded)")
+    click.echo(f"L3 request-token distribution ({d['n']} requests):")
+    click.echo("  (all request content: messages, system prompt, tool definitions, tool I/O)")
     click.echo(f"  min: {d['min']:>7}   p50: {d['p50']:>7}   p75: {d['p75']:>7}")
     click.echo(f"  p90: {d['p90']:>7}   p95: {d['p95']:>7}   p99: {d['p99']:>7}   max: {d['max']:>7}")
     click.echo()
@@ -422,7 +422,7 @@ def _usage_savings(since, profile_name):
     click.echo(f"requests: {total_req}  (flash {flash['requests']} / pro {pro['requests']}, "
                f"{pct_req}% flash, fallback {t['fallback']})")
     click.echo()
-    click.echo("message input tokens (input side only — output tokens are not visible to the proxy):")
+    click.echo("request input tokens (input side only — output tokens are not visible to the proxy):")
     click.echo(f"  flash   {flash['tokens']:>9,}   avg {flash['tokens'] // max(flash['requests'], 1):,}/req")
     click.echo(f"  pro     {pro['tokens']:>9,}   avg {pro['tokens'] // max(pro['requests'], 1):,}/req")
     click.echo(f"  total   {total_tok:>9,}")

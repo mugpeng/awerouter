@@ -96,6 +96,8 @@ return "x-api-key" if netloc == "api.anthropic.com" or netloc.endswith(".anthrop
 
 **但 calibrate 的文档/输出要说清这一点**——当前 `L3 token distribution` 字样会让人误以为是总 token。改输出标注为 "message token"。
 
+**2026-08-17 已推翻**（v0.3.7，见 `unified-token-counting.md`）：为统一三协议的 L3 阈值语义与跨 agent 可比性，token_count 现已计入 system prompt、工具定义、工具结果、工具调用参数与 thinking 块。升级后需用 `usage calibrate` 重新定 `longContextThreshold`。
+
 ### 并发 / 断连测试
 
 每请求独立的 `_RoutingState`，无共享可变状态，并发测试 ROI 低。断连路径有 try/finally，已 e2e 验证过。不补单测。
