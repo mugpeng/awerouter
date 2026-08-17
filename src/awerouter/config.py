@@ -242,7 +242,7 @@ def load_routing(path: Optional[Path] = None) -> tuple[Settings, dict[str, Routi
         if "agent" in body:
             die(
                 f"profile '{name}': 'agent' was renamed to 'protocol' "
-                "(claude → anthropic, codex → openai-chat / openai-responses); edit routing.json"
+                "(claude → anthropic, codex → openai-responses); edit routing.json"
             )
         protocol = body.get("protocol")
         if not protocol:

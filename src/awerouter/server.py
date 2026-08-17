@@ -471,12 +471,21 @@ def _client_hint(protocol: str, display_host: str, port: int, settings) -> str:
             f"ANTHROPIC_DEFAULT_HAIKU_MODEL={settings.background_model}  "
             f"ANTHROPIC_DEFAULT_OPUS_MODEL={settings.think_model}"
         )
-    wire_api = "chat" if protocol == "openai-chat" else "responses"
-    return (
+    base = (
         "point your OpenAI client here:\n"
         f"  export OPENAI_BASE_URL=http://{display_host}:{port}/v1\n"
         f"  (base_url with or without /v1 both work)\n"
-        f"  codex: set base_url to the same URL in config.toml (wire_api = \"{wire_api}\")"
+    )
+    if protocol == "openai-responses":
+        return base + (
+            '  codex: set base_url to the same URL in config.toml '
+            '(wire_api = "responses")'
+        )
+    # codex 0.122+ dropped the chat wire entirely; a chat profile cannot serve
+    # it, so send codex to an openai-responses profile of the same destinations.
+    return base + (
+        '  codex: wire_api = "chat" is no longer supported (codex 0.122+) —\n'
+        "  serve an openai-responses profile and point codex at that instead"
     )
 
 

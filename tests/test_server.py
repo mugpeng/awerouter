@@ -11,6 +11,7 @@ from aiohttp.test_utils import TestClient, TestServer
 from awerouter import __version__
 from awerouter.server import (
     _agent_from_ua,
+    _client_hint,
     _loopback_proxy_warning,
     _resolve_auto_threshold,
     _serve,
@@ -543,6 +544,29 @@ class TestAgentFromUA:
 
     def test_empty(self):
         assert _agent_from_ua("") == ""
+
+
+class TestClientHint:
+    def _settings(self):
+        return Settings(background_model="flash", think_model="pro")
+
+    def test_openai_chat_does_not_suggest_dead_codex_wire(self):
+        """codex 0.122+ rejects wire_api = "chat"; the hint must not recommend
+        setting it (mentioning its removal is fine)."""
+        hint = _client_hint("openai-chat", "127.0.0.1", 20128, self._settings())
+        assert 'config.toml (wire_api = "chat")' not in hint
+        assert "no longer supported" in hint
+        assert "openai-responses" in hint
+        assert "OPENAI_BASE_URL=http://127.0.0.1:20128/v1" in hint
+
+    def test_openai_responses_keeps_codex_hint(self):
+        hint = _client_hint("openai-responses", "127.0.0.1", 20128, self._settings())
+        assert 'wire_api = "responses"' in hint
+        assert "OPENAI_BASE_URL=http://127.0.0.1:20128/v1" in hint
+
+    def test_anthropic_hint_unchanged(self):
+        hint = _client_hint("anthropic", "127.0.0.1", 20128, self._settings())
+        assert "ANTHROPIC_BASE_URL=http://127.0.0.1:20128" in hint
 
 
 class TestResolveAutoThreshold:
