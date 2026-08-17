@@ -174,7 +174,13 @@ The auth header is **auto-detected from `base_url`**: `anthropic.com` → `x-api
   "settings": {
     "backgroundModel": "flash",
     "thinkModel": "pro",
-    "webSearchModel": "pro"
+    "webSearchModel": "pro",
+    "longContextAuto": {
+      "percentile": 95,
+      "windowDays": 7,
+      "minSamples": 50,
+      "fallbackThreshold": 8000
+    }
   },
   "cc-router-1": {
     "protocol": "anthropic",
@@ -189,6 +195,8 @@ The auth header is **auto-detected from `base_url`**: `anthropic.com` → `x-api
 ```
 
 `settings` is optional (defaults: `flash`/`pro`). It maps the model ids CC sends for the background (Haiku) and think (Opus) tiers, plus the `webSearchModel` destination for L1 web_search traffic (default `pro`). The main loop uses `auto` — routed by difficulty by L3. Set these in your aweswitch profile: `ANTHROPIC_DEFAULT_HAIKU_MODEL=flash`, `ANTHROPIC_MODEL=auto`, `ANTHROPIC_DEFAULT_OPUS_MODEL=pro`.
+
+`longContextThreshold` is an integer, or `"auto"` to calibrate it from this profile's own traffic: at every `serve` start, awerouter takes the `percentile` of the profile's L3 effective-token distribution over the trailing `windowDays` as the threshold. With fewer than `minSamples` L3 requests in the window (fresh profile, quiet week) the `fallbackThreshold` applies instead. All four knobs live in `settings.longContextAuto` and are optional — the banner always prints what was picked and why. Note the percentile sets the flash/pro *split*, not flash's capability ceiling: if your flash model degrades on very long contexts, keep a manual threshold.
 
 Keys reference `${ENV_VAR}` syntax. Missing env vars die with a clear message at startup.
 
@@ -236,7 +244,7 @@ All `usage` subcommands read the same request log. `log`, `stats`, `tokens`, `ca
 
 `config edit` and the `add` wizard snapshot the target file to `<name>.json.bak` before every write; `awerouter restore [providers|routing]` copies a backup back (with confirmation, then validates the restored config). `config path` prints the two config file paths; `config show [PROFILE]` shows the redacted full config, or just one profile's providers and routing entry.
 
-`usage calibrate` shows the request-token distribution of L3 traffic (the threshold-sensitive layer; all request content — messages, system prompt, tools, tool I/O) and suggests candidate `longContextThreshold` values at p90/p95/p99. Run it after some real traffic, then edit `routing.json`.
+`usage calibrate` shows the request-token distribution of L3 traffic (the threshold-sensitive layer; all request content — messages, system prompt, tools, tool I/O) and suggests candidate `longContextThreshold` values at p90/p95/p99, plus what `"auto"` would pick under `settings.longContextAuto`. Run it after some real traffic, then either edit `routing.json` or switch the profile to `"auto"` and let serve calibrate on each start.
 
 `usage savings` is the token accounting view: how many request-input tokens each tier consumed and how many pro input tokens routing offloaded to flash vs a pro-only baseline. A cache-sensitivity section brackets the offload between "all cache reads" and "all full price" (Anthropic-style ~0.1x read / 1.25x write / 5-min TTL) and shows your switch cadence vs the TTL — a cache-warm pro-only baseline would have billed those tokens at cache-read prices. The output ends with ready-to-fill formulas using the measured token counts — substitute your providers' input prices (per 1M tokens) and read off the saved amount (output tokens, flash-side caching, and capability-mismatch turns are not modeled).
 

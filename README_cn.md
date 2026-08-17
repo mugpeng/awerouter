@@ -174,7 +174,13 @@ export ANTHROPIC_BASE_URL=http://127.0.0.1:20128
   "settings": {
     "backgroundModel": "flash",
     "thinkModel": "pro",
-    "webSearchModel": "pro"
+    "webSearchModel": "pro",
+    "longContextAuto": {
+      "percentile": 95,
+      "windowDays": 7,
+      "minSamples": 50,
+      "fallbackThreshold": 8000
+    }
   },
   "cc-router-1": {
     "protocol": "anthropic",
@@ -189,6 +195,8 @@ export ANTHROPIC_BASE_URL=http://127.0.0.1:20128
 ```
 
 `settings` 可省（默认 `flash`/`pro`）。它定义 CC 发送的档位 model id：background（Haiku 档）、think（Opus 档），以及 L1 web_search 流量的目标档位 `webSearchModel`（默认 `pro`）。主循环用 `auto`——由 L3 按难度路由。在 aweswitch profile 里设：`ANTHROPIC_DEFAULT_HAIKU_MODEL=flash`、`ANTHROPIC_MODEL=auto`、`ANTHROPIC_DEFAULT_OPUS_MODEL=pro`。
+
+`longContextThreshold` 可以是整数，也可以写 `"auto"`：每次 `serve` 启动时，awerouter 取该 profile 自己最近 `windowDays` 天 L3 有效 token 分布的 `percentile` 分位值作为阈值。窗口内 L3 请求数不足 `minSamples`（新 profile、流量清淡）时改用 `fallbackThreshold`。四个参数都在 `settings.longContextAuto` 里，全部可选——横幅每次都会打印选了什么、依据是什么。注意：分位值决定的是 flash/pro 的*分配比例*，不代表 flash 的能力上限——如果你的 flash 模型在超长上下文上明显退化，请继续用固定阈值。
 
 密钥用 `${ENV_VAR}` 引用。缺失的环境变量在启动时报错退出。
 
@@ -234,7 +242,7 @@ awerouter usage savings
 
 `config edit` 和 `add` 向导在每次写入前把目标文件快照为 `<名称>.json.bak`；`awerouter restore [providers|routing]` 确认后把备份拷回并校验恢复后的配置。`config path` 打印两个配置文件路径；`config show [PROFILE]` 显示脱敏全量配置，或单个 profile 用到的 provider 与路由条目。
 
-`usage calibrate` 展示 L3 流量（受阈值影响的层）的请求 token 分布（统计全部请求内容：messages、system prompt、工具定义与工具 I/O），并在 p90/p95/p99 处建议 `longContextThreshold` 候选值。跑一段真实流量后执行，再编辑 `routing.json`。
+`usage calibrate` 展示 L3 流量（受阈值影响的层）的请求 token 分布（统计全部请求内容：messages、system prompt、工具定义与工具 I/O），并在 p90/p95/p99 处建议 `longContextThreshold` 候选值，末尾给出按 `settings.longContextAuto` 策略 `"auto"` 会选的值。跑一段真实流量后执行，再编辑 `routing.json`，或把 profile 改成 `"auto"` 交给 serve 每次启动时自动校准。
 
 `usage tokens` 按内容类型（messages、system prompt、工具定义、工具结果、工具调用参数、thinking）汇总输入 token 的总量与占比——可以看出请求 token 里多少是环境常量（system prompt + 工具定义）、多少是真实对话。
 

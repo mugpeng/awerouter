@@ -14,7 +14,7 @@ from urllib.parse import urlparse
 
 from awerouter import __version__
 from awerouter.protocols import PROTOCOL_IDS
-from awerouter.types import Destination, Provider, RoutingProfile, Settings
+from awerouter.types import AutoThresholdConfig, Destination, Provider, RoutingProfile, Settings
 
 # ---------------------------------------------------------------------------
 # Constants (mirror aweswitch cli.py conventions exactly)
@@ -181,6 +181,36 @@ def load_providers(path: Optional[Path] = None) -> dict[str, dict[str, Provider]
     return result
 
 
+def _parse_auto_threshold(raw) -> AutoThresholdConfig:
+    """Parse settings.longContextAuto (all fields optional; defaults in the type)."""
+    if raw is None:
+        return AutoThresholdConfig()
+    if not isinstance(raw, dict):
+        die("routing.json settings 'longContextAuto' must be an object")
+
+    def int_field(key: str, lo: int, hi: int | None = None) -> "int | None":
+        if key not in raw:
+            return None
+        value = raw[key]
+        if isinstance(value, bool) or not isinstance(value, int):
+            die(f"routing.json settings longContextAuto '{key}' must be an integer, got: {value!r}")
+        bound = f" in {lo}-{hi}" if hi is not None else f" >= {lo}"
+        if value < lo or (hi is not None and value > hi):
+            die(f"routing.json settings longContextAuto '{key}' must be{bound}, got: {value}")
+        return value
+
+    cfg = AutoThresholdConfig()
+    if (v := int_field("percentile", 1, 99)) is not None:
+        cfg.percentile = v
+    if (v := int_field("windowDays", 1)) is not None:
+        cfg.window_days = v
+    if (v := int_field("minSamples", 1)) is not None:
+        cfg.min_samples = v
+    if (v := int_field("fallbackThreshold", 0)) is not None:
+        cfg.fallback_threshold = v
+    return cfg
+
+
 def load_routing(path: Optional[Path] = None) -> tuple[Settings, dict[str, RoutingProfile]]:
     """Load global settings + all routing profiles keyed by profile id."""
     path = path or routing_path()
@@ -202,6 +232,7 @@ def load_routing(path: Optional[Path] = None) -> tuple[Settings, dict[str, Routi
         think_model=str(raw_settings.get("thinkModel", "pro")),
         web_search_model=str(raw_settings.get("webSearchModel", "pro")),
         search_result_discount=discount,
+        long_context_auto=_parse_auto_threshold(raw_settings.get("longContextAuto")),
     )
 
     profiles: dict[str, RoutingProfile] = {}
@@ -236,12 +267,29 @@ def load_routing(path: Optional[Path] = None) -> tuple[Settings, dict[str, Routi
             if tier not in ("flash", "pro"):
                 die(f"profile '{name}' destination key must be flash or pro, got: {tier}")
             parsed[tier] = _parse_destination(str(raw))
+        raw_threshold = body["longContextThreshold"]
+        if raw_threshold == "auto":
+            # Resolved at serve start; the fallback value keeps reads before
+            # that (config show, tests) meaningful.
+            threshold_auto = True
+            threshold = settings.long_context_auto.fallback_threshold
+        else:
+            threshold_auto = False
+            try:
+                threshold = int(raw_threshold)
+            except (TypeError, ValueError):
+                die(f"profile '{name}': 'longContextThreshold' must be a non-negative "
+                    f"integer or \"auto\", got: {raw_threshold!r}")
+            if threshold < 0:
+                die(f"profile '{name}': 'longContextThreshold' must be a non-negative "
+                    f"integer or \"auto\", got: {threshold}")
         profiles[name] = RoutingProfile(
             name=name,
             protocol=str(protocol),
-            long_context_threshold=int(body["longContextThreshold"]),
+            long_context_threshold=threshold,
             destinations=parsed,
             port=port_raw,
+            threshold_auto=threshold_auto,
         )
     return settings, profiles
 
@@ -324,9 +372,10 @@ def save_provider(protocol: str, name: str, base_url: str, auth: str) -> None:
 
 
 def save_profile_entry(
-    name: str, protocol: str, long_context_threshold: int, flash: str, pro: str
+    name: str, protocol: str, long_context_threshold: "int | str", flash: str, pro: str
 ) -> None:
-    """Append one profile entry to routing.json. flash/pro are 'provider,model'."""
+    """Append one profile entry to routing.json. flash/pro are 'provider,model';
+    long_context_threshold may be the string "auto"."""
     path = routing_path()
     data = _load_json(path, "routing.json")
     if name in data:
@@ -366,12 +415,18 @@ def format_routing_display(settings: Settings, profiles: dict[str, RoutingProfil
             "thinkModel": settings.think_model,
             "webSearchModel": settings.web_search_model,
             "searchResultDiscount": settings.search_result_discount,
+            "longContextAuto": {
+                "percentile": settings.long_context_auto.percentile,
+                "windowDays": settings.long_context_auto.window_days,
+                "minSamples": settings.long_context_auto.min_samples,
+                "fallbackThreshold": settings.long_context_auto.fallback_threshold,
+            },
         },
     }
     for name, p in profiles.items():
         entry = {
             "protocol": p.protocol,
-            "longContextThreshold": p.long_context_threshold,
+            "longContextThreshold": "auto" if p.threshold_auto else p.long_context_threshold,
         }
         if p.port is not None:
             entry["port"] = p.port

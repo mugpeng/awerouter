@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from awerouter.protocols import effective_tokens
@@ -432,18 +432,29 @@ def clear_logs() -> list:
 # L3 labels: threshold-sensitive (decided by token_count vs longContextThreshold).
 # L1 (webSearch) and L2 (background/think) route the same regardless of threshold.
 _L3_LABELS = frozenset({"default", "longContext", "image"})
+_FALLBACK_SUFFIX = "→fallback"
 
 
-def token_distribution(since=None, profile=None, discount: float = 0.3) -> dict:
-    """Token distribution of L3 traffic for calibrating longContextThreshold.
+def _base_label(label: str) -> str:
+    """Strip the flash→pro fallback suffix: the request was still L3-decided,
+    so it belongs in the calibration distribution (flash failing must not
+    shrink the sample set)."""
+    if label.endswith(_FALLBACK_SUFFIX):
+        return label[: -len(_FALLBACK_SUFFIX)]
+    return label
 
-    Only L3 requests (label in default/longContext/image) are threshold-sensitive;
-    L1/L2 route identically no matter where the threshold sits. File-search
-    result tokens are weighed at `discount` — the same number L3 compares.
+
+def _l3_tokens(since=None, profile=None, discount: float = 0.3) -> list:
+    """Sorted effective-token samples of L3 traffic for calibrating
+    longContextThreshold.
+
+    Only L3 requests are threshold-sensitive; L1/L2 route identically no matter
+    where the threshold sits. File-search result tokens are weighed at
+    `discount` — the same number L3 compares.
     """
     f = _log_file()
     if not f.exists():
-        return {}
+        return []
     tokens: list[int] = []
     for line in f.read_text(encoding="utf-8").splitlines():
         if not line:
@@ -454,14 +465,20 @@ def token_distribution(since=None, profile=None, discount: float = 0.3) -> dict:
             continue
         if not _passes(data, since, profile):
             continue
-        if data.get("label", "") not in _L3_LABELS:
+        if _base_label(data.get("label", "")) not in _L3_LABELS:
             continue
         tokens.append(effective_tokens(
             data.get("token_count", 0), data.get("file_search_tokens", 0), discount
         ))
+    tokens.sort()
+    return tokens
+
+
+def token_distribution(since=None, profile=None, discount: float = 0.3) -> dict:
+    """Token distribution of L3 traffic for calibrating longContextThreshold."""
+    tokens = _l3_tokens(since, profile, discount)
     if not tokens:
         return {}
-    tokens.sort()
     n = len(tokens)
 
     def pct(p: int) -> int:
@@ -487,3 +504,21 @@ def token_distribution(since=None, profile=None, discount: float = 0.3) -> dict:
             {"threshold": pct(99), "flash_pct": round(100 * count_below(pct(99)) / n)},
         ],
     }
+
+
+def auto_threshold(profile_name, discount: float, cfg, now=None) -> "tuple[int, int] | None":
+    """Pick a longContextThreshold per settings.longContextAuto from this
+    profile's own L3 traffic.
+
+    Returns (threshold, samples) at cfg.percentile over the trailing
+    cfg.window_days, or None when fewer than cfg.min_samples L3 samples exist
+    (caller applies cfg.fallback_threshold).
+    """
+    if now is None:
+        now = datetime.now(timezone.utc)
+    since = now - timedelta(days=cfg.window_days)
+    tokens = _l3_tokens(since, profile_name, discount)
+    if len(tokens) < cfg.min_samples:
+        return None
+    idx = max(0, min(len(tokens) - 1, round(cfg.percentile / 100 * (len(tokens) - 1))))
+    return tokens[idx], len(tokens)

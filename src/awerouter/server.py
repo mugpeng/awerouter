@@ -20,7 +20,7 @@ from aiohttp import web
 
 from awerouter import __version__
 from awerouter.config import die, expand_value
-from awerouter.logging import append, ensure_log_dir
+from awerouter.logging import append, auto_threshold, ensure_log_dir
 from awerouter.protocols import ENDPOINT_PATHS, extract
 from awerouter.router import resolve
 from awerouter.types import RequestLog, ResolveResult
@@ -484,8 +484,30 @@ def _client_hint(protocol: str, display_host: str, port: int, settings) -> str:
 _PORT_SCAN_SPAN = 100
 
 
+def _resolve_auto_threshold(profile, settings) -> "str | None":
+    """Materialize longContextThreshold: "auto" from this profile's own log.
+
+    Runs once at serve start (before the socket opens, so no request can race
+    it); the value stays fixed for the process lifetime. With too few samples
+    the fallbackThreshold loaded by config.py stays in effect. Returns the
+    banner line to print — the choice must be visible.
+    """
+    if not profile.threshold_auto:
+        return None
+    cfg = settings.long_context_auto
+    picked = auto_threshold(profile.name, settings.search_result_discount, cfg)
+    if picked is not None:
+        threshold, samples = picked
+        profile.long_context_threshold = threshold
+        return (f"  L3 threshold -> auto: p{cfg.percentile} of {samples} L3 requests "
+                f"(last {cfg.window_days}d) = {threshold:,}")
+    return (f"  L3 threshold -> auto: fewer than {cfg.min_samples} L3 requests in "
+            f"last {cfg.window_days}d — fallbackThreshold {cfg.fallback_threshold:,} in effect")
+
+
 async def _serve(host: str, port: int, providers: dict, profile, settings,
                  port_explicit: bool = False) -> None:
+    auto_line = _resolve_auto_threshold(profile, settings)
     app = create_app(providers, profile, settings)
     runner = web.AppRunner(app)
     await runner.setup()
@@ -534,7 +556,10 @@ async def _serve(host: str, port: int, providers: dict, profile, settings,
           f"main -> auto  web_search -> {settings.web_search_model}")
     print(f"  flash  -> {profile.destinations['flash'].provider_name}/{profile.destinations['flash'].model}")
     print(f"  pro    -> {profile.destinations['pro'].provider_name}/{profile.destinations['pro'].model}")
-    print(f"  L3 threshold -> {profile.long_context_threshold}")
+    if auto_line is not None:
+        print(auto_line)
+    else:
+        print(f"  L3 threshold -> {profile.long_context_threshold}")
     display_host = "127.0.0.1" if host in ("0.0.0.0", "::") else host
     print()
     print(_client_hint(profile.protocol, display_host, actual_port, settings))

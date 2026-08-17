@@ -227,6 +227,104 @@ class TestLoadRouting:
         with pytest.raises(SystemExit, match="searchResultDiscount"):
             load_routing()
 
+    def test_settings_long_context_auto_defaults(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+        _write_config(tmp_path, {}, {
+            "cc-1": {"protocol": "anthropic", "longContextThreshold": 1,
+                     "destinations": {"flash": "p,m", "pro": "p,m"}},
+        })
+        cfg = load_routing()[0].long_context_auto
+        assert (cfg.percentile, cfg.window_days, cfg.min_samples, cfg.fallback_threshold) == (95, 7, 50, 8000)
+
+    def test_settings_long_context_auto_explicit(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+        _write_config(tmp_path, {}, {
+            "settings": {"longContextAuto": {
+                "percentile": 90, "windowDays": 14, "minSamples": 20, "fallbackThreshold": 4000,
+            }},
+            "cc-1": {"protocol": "anthropic", "longContextThreshold": 1,
+                     "destinations": {"flash": "p,m", "pro": "p,m"}},
+        })
+        cfg = load_routing()[0].long_context_auto
+        assert (cfg.percentile, cfg.window_days, cfg.min_samples, cfg.fallback_threshold) == (90, 14, 20, 4000)
+
+    def test_settings_long_context_auto_partial(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+        _write_config(tmp_path, {}, {
+            "settings": {"longContextAuto": {"percentile": 99}},
+            "cc-1": {"protocol": "anthropic", "longContextThreshold": 1,
+                     "destinations": {"flash": "p,m", "pro": "p,m"}},
+        })
+        cfg = load_routing()[0].long_context_auto
+        assert cfg.percentile == 99
+        assert cfg.fallback_threshold == 8000
+
+    @pytest.mark.parametrize("key,bad", [
+        ("percentile", 0), ("percentile", 100), ("percentile", "95"), ("percentile", True),
+        ("windowDays", 0), ("minSamples", 0), ("fallbackThreshold", -1),
+    ])
+    def test_settings_long_context_auto_invalid_dies(self, tmp_path, monkeypatch, key, bad):
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+        _write_config(tmp_path, {}, {
+            "settings": {"longContextAuto": {key: bad}},
+            "cc-1": {"protocol": "anthropic", "longContextThreshold": 1,
+                     "destinations": {"flash": "p,m", "pro": "p,m"}},
+        })
+        with pytest.raises(SystemExit, match="longContextAuto"):
+            load_routing()
+
+    def test_settings_long_context_auto_not_object_dies(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+        _write_config(tmp_path, {}, {
+            "settings": {"longContextAuto": 5},
+            "cc-1": {"protocol": "anthropic", "longContextThreshold": 1,
+                     "destinations": {"flash": "p,m", "pro": "p,m"}},
+        })
+        with pytest.raises(SystemExit, match="'longContextAuto' must be an object"):
+            load_routing()
+
+    def test_threshold_auto_marks_profile(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+        _write_config(tmp_path, {}, {
+            "cc-1": {"protocol": "anthropic", "longContextThreshold": "auto",
+                     "destinations": {"flash": "p,m", "pro": "p,m"}},
+        })
+        _, profiles = load_routing()
+        assert profiles["cc-1"].threshold_auto is True
+        # before serve resolves it, reads see the configured fallback
+        assert profiles["cc-1"].long_context_threshold == 8000
+
+    def test_threshold_auto_placeholder_is_configured_fallback(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+        _write_config(tmp_path, {}, {
+            "settings": {"longContextAuto": {"fallbackThreshold": 4000}},
+            "cc-1": {"protocol": "anthropic", "longContextThreshold": "auto",
+                     "destinations": {"flash": "p,m", "pro": "p,m"}},
+        })
+        _, profiles = load_routing()
+        assert profiles["cc-1"].long_context_threshold == 4000
+
+    @pytest.mark.parametrize("bad", ["fast", -5])
+    def test_threshold_invalid_dies(self, tmp_path, monkeypatch, bad):
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+        _write_config(tmp_path, {}, {
+            "cc-1": {"protocol": "anthropic", "longContextThreshold": bad,
+                     "destinations": {"flash": "p,m", "pro": "p,m"}},
+        })
+        with pytest.raises(SystemExit, match="longContextThreshold"):
+            load_routing()
+
+    def test_threshold_numeric_string_still_parses(self, tmp_path, monkeypatch):
+        """Pre-existing leniency: a numeric string keeps working."""
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+        _write_config(tmp_path, {}, {
+            "cc-1": {"protocol": "anthropic", "longContextThreshold": "8000",
+                     "destinations": {"flash": "p,m", "pro": "p,m"}},
+        })
+        _, profiles = load_routing()
+        assert profiles["cc-1"].long_context_threshold == 8000
+        assert profiles["cc-1"].threshold_auto is False
+
     def test_multiple_profiles(self, tmp_path, monkeypatch):
         monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
         _write_config(tmp_path, {}, {
@@ -448,3 +546,15 @@ class TestFormatDisplay:
         }
         data = json.loads(format_routing_display(settings, profiles))
         assert data["cc-1"]["port"] == 20129
+
+    def test_routing_shows_auto_threshold(self):
+        settings = Settings()
+        profiles = {
+            "cc-1": RoutingProfile("cc-1", "anthropic", 8000, {
+                "flash": Destination("p", "m1"), "pro": Destination("p", "m2"),
+            }, threshold_auto=True),
+        }
+        data = json.loads(format_routing_display(settings, profiles))
+        assert data["cc-1"]["longContextThreshold"] == "auto"
+        auto = data["settings"]["longContextAuto"]
+        assert auto == {"percentile": 95, "windowDays": 7, "minSamples": 50, "fallbackThreshold": 8000}

@@ -111,6 +111,15 @@ class TestList:
         assert any(l.startswith("cc-1\tanthropic\t20129\t") for l in lines)
         assert any(l.startswith("cc-2\tanthropic\t-\t") for l in lines)
 
+    def test_lists_auto_threshold(self, tmp_path, monkeypatch):
+        routing = _routing()
+        routing["cc-1"]["longContextThreshold"] = "auto"
+        _setup(tmp_path, monkeypatch, _providers(), routing)
+        r = CliRunner().invoke(cli, ["list"])
+        assert r.exit_code == 0
+        assert any(l.startswith("cc-1\tanthropic\t-\tstepfun/sf-flash\tanthropic/opus\tL3>auto")
+                   for l in r.output.splitlines())
+
 
 class TestResolvePort:
     """--port > profile 'port' field > 20128; explicit ports must not drift."""
@@ -190,6 +199,24 @@ class TestAdd:
         # the wizard result must actually serve
         _, profile, _ = load_for_profile("cc-3")
         assert profile.destinations["pro"].model == "opus-9"
+
+    def test_wizard_accepts_auto_threshold(self, tmp_path, monkeypatch):
+        _setup(tmp_path, monkeypatch, _providers(), _routing())
+        answers = "\n".join([
+            "cc-3",        # profile name
+            "",            # protocol (default anthropic)
+            "stepfun",     # flash provider (existing)
+            "sf-flash",    # flash model
+            "stepfun",     # pro provider (existing)
+            "sf-pro",      # pro model
+            "auto",        # threshold
+        ]) + "\n"
+        r = CliRunner().invoke(cli, ["add"], input=answers)
+        assert r.exit_code == 0, r.output
+        routing = json.loads((tmp_path / "routing.json").read_text())
+        assert routing["cc-3"]["longContextThreshold"] == "auto"
+        _, profile, _ = load_for_profile("cc-3")
+        assert profile.threshold_auto is True
 
     def test_wizard_shows_category_overview(self, tmp_path, monkeypatch):
         _setup(tmp_path, monkeypatch, _providers(), _routing())
@@ -384,6 +411,16 @@ class TestUsage:
         r = CliRunner().invoke(cli, ["usage", "calibrate"])
         assert r.exit_code == 0, r.output
         assert "weighed at 50%" in r.output
+
+    def test_calibrate_shows_auto_pick(self, tmp_path, monkeypatch):
+        """The auto line names the policy's own window, independent of --since."""
+        _setup(tmp_path, monkeypatch, _providers(), _routing())
+        self._seed_log(tmp_path, monkeypatch)  # 1 sample < minSamples 50
+        r = CliRunner().invoke(cli, ["usage", "calibrate"])
+        assert r.exit_code == 0, r.output
+        assert "'auto'" in r.output
+        assert "fewer than 50 L3 requests" in r.output
+        assert "fallbackThreshold 8,000" in r.output
 
     def test_bad_since_errors(self, tmp_path, monkeypatch):
         _setup(tmp_path, monkeypatch, _providers(), _routing())

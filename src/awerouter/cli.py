@@ -28,6 +28,7 @@ from awerouter.config import (
 )
 from awerouter.protocols import PROTOCOL_IDS
 from awerouter.server import _serve
+from awerouter.types import AutoThresholdConfig
 
 # Attach config sub-group to the main cli group
 cli = config_cli
@@ -127,7 +128,17 @@ def add():
 
     flash = ask_tier("flash")
     pro = ask_tier("pro")
-    threshold = click.prompt("longContextThreshold", default=8000, type=int)
+    threshold_raw = click.prompt(
+        "longContextThreshold (integer, or 'auto' to calibrate from this profile's traffic)",
+        default="8000",
+    )
+    if threshold_raw.strip().lower() == "auto":
+        threshold = "auto"
+    else:
+        try:
+            threshold = int(threshold_raw)
+        except ValueError:
+            die(f"longContextThreshold must be an integer or 'auto', got: {threshold_raw!r}")
     save_profile_entry(name, protocol, threshold, flash, pro)
 
     # Fail loudly if the wizard wrote something inconsistent.
@@ -145,9 +156,10 @@ def list_profiles():
     for name, p in profiles.items():
         flash = p.destinations["flash"]
         pro = p.destinations["pro"]
+        threshold = "auto" if p.threshold_auto else p.long_context_threshold
         click.echo(
             f"{name}\t{p.protocol}\t{p.port or '-'}\t{flash.provider_name}/{flash.model}"
-            f"\t{pro.provider_name}/{pro.model}\tL3>{p.long_context_threshold}"
+            f"\t{pro.provider_name}/{pro.model}\tL3>{threshold}"
         )
 
 
@@ -426,12 +438,13 @@ def calibrate(since, profile_name):
     Only L3 traffic (default/longContext/image labels) is threshold-sensitive;
     L1 (webSearch) and L2 (background/think) route identically regardless.
     """
-    from awerouter.logging import token_distribution
+    from awerouter.logging import auto_threshold, token_distribution
     cutoff = _window_cutoff(since, profile_name)
     try:
-        discount = load_routing()[0].search_result_discount
+        settings = load_routing()[0]
     except SystemExit:
-        discount = 0.3  # calibrate is a log view; routing.json missing → default
+        settings = None  # calibrate is a log view; routing.json missing → defaults
+    discount = settings.search_result_discount if settings else 0.3
     d = token_distribution(cutoff, profile_name, discount)
     if not d:
         click.echo("(no L3 traffic yet — run some non-background/think requests first)")
@@ -445,6 +458,18 @@ def calibrate(since, profile_name):
     click.echo("if you set longContextThreshold to:")
     for c in d["candidates"]:
         click.echo(f"  {c['threshold']:>7}   → {c['flash_pct']}% flash, {100 - c['flash_pct']}% pro")
+    # The auto policy uses its own trailing window (settings.longContextAuto),
+    # independent of the --since view above.
+    cfg = settings.long_context_auto if settings else AutoThresholdConfig()
+    picked = auto_threshold(profile_name, discount, cfg)
+    click.echo()
+    if picked is not None:
+        threshold, n = picked
+        click.echo(f"'auto' would set: {threshold:,}  "
+                   f"(p{cfg.percentile} of {n} L3 requests, last {cfg.window_days}d)")
+    else:
+        click.echo(f"'auto': fewer than {cfg.min_samples} L3 requests in last {cfg.window_days}d "
+                   f"— would use fallbackThreshold {cfg.fallback_threshold:,}")
 
 
 # Anthropic-style cache economics for the savings bracket (price multipliers,

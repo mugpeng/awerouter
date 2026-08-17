@@ -174,7 +174,7 @@ Tell the user the difference between the two files:
 1. Read `routing.json`.
 2. Set a `profile` id for each routing setup.
 3. Set `protocol` to the matching provider group.
-4. Set `longContextThreshold` based on real traffic.
+4. Set `longContextThreshold` to an integer, or `"auto"` to calibrate it from the profile's own traffic at each serve start (policy in `settings.longContextAuto`: `percentile`/`windowDays`/`minSamples`/`fallbackThreshold`, all optional).
 5. Use `destinations.flash` for cheap/fast tasks and `destinations.pro` for hard tasks.
 
 If the user is unsure, recommend starting from `awerouter init` and changing one profile at a time.
@@ -253,7 +253,7 @@ awerouter usage calibrate
 
 If the user wants cheaper routing without losing accuracy:
 1. Start from `awerouter usage calibrate`.
-2. Adjust `longContextThreshold`.
+2. Adjust `longContextThreshold`, or set it to `"auto"` so each serve start picks the percentile of the profile's own recent L3 traffic (the calibrate output ends with the value auto would pick).
 3. Review `awerouter usage savings`.
 
 ## Final Step

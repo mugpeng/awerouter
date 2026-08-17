@@ -1,12 +1,13 @@
 """Tests for awerouter.logging."""
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
 
 from awerouter.logging import (
+    auto_threshold,
     cadence,
     clear_logs,
     log_start,
@@ -16,7 +17,7 @@ from awerouter.logging import (
     token_distribution,
     token_totals,
 )
-from awerouter.types import RequestLog
+from awerouter.types import AutoThresholdConfig, RequestLog
 
 
 def _log(ts: str, label: str, token_count: int, destination="flash", bytes_=100,
@@ -437,6 +438,16 @@ class TestTokenDistribution:
         assert d["min"] == 10
         assert d["max"] == 500
 
+    def test_includes_fallback_suffix_labels(self, _log_dir):
+        """'default→fallback' entries are L3-decided — flash failing must not
+        shrink the calibration sample set."""
+        from awerouter.logging import append
+        append(_log("t1", "default", 10))
+        append(_log("t2", "longContext→fallback", 500))
+        d = token_distribution()
+        assert d["n"] == 2
+        assert d["max"] == 500
+
     def test_search_discount_applies(self, _log_dir):
         """Distribution over effective tokens: raw 1000 with 600 file-search
         at the default 0.3 weight counts as 1000 - int(600 * 0.7) = 580."""
@@ -478,3 +489,53 @@ class TestTokenDistribution:
         assert d["min"] == d["max"] == 42
         for c in d["candidates"]:
             assert c["flash_pct"] == 100
+
+
+_NOW = datetime(2026, 8, 17, tzinfo=timezone.utc)
+
+
+class TestAutoThreshold:
+    """settings.longContextAuto policy over the profile's own L3 traffic."""
+
+    def test_no_log_returns_none(self, _log_dir):
+        assert auto_threshold("cc-1", 0.3, AutoThresholdConfig()) is None
+
+    def test_below_min_samples_returns_none(self, _log_dir):
+        from awerouter.logging import append
+        for i in range(10):
+            append(_log(f"t{i}", "default", i * 100))
+        assert auto_threshold("cc-1", 0.3, AutoThresholdConfig(min_samples=50)) is None
+
+    def test_picks_percentile(self, _log_dir):
+        from awerouter.logging import append
+        for i in range(1, 101):  # 100 samples, tokens 100..10,000
+            append(_log(_NOW.isoformat(), "default", i * 100))
+        cfg = AutoThresholdConfig(percentile=95, min_samples=50)
+        assert auto_threshold("cc-1", 0.3, cfg, now=_NOW) == (9500, 100)
+
+    def test_window_excludes_stale_samples(self, _log_dir):
+        from awerouter.logging import append
+        fresh = (_NOW - timedelta(days=1)).isoformat()
+        stale = (_NOW - timedelta(days=30)).isoformat()
+        for i in range(60):
+            append(_log(fresh, "default", 500))
+            append(_log(stale, "longContext", 9000))
+        assert auto_threshold("cc-1", 0.3, AutoThresholdConfig(min_samples=50), now=_NOW) == (500, 60)
+        # stale samples must not rescue a thin fresh window
+        assert auto_threshold("cc-1", 0.3, AutoThresholdConfig(min_samples=61), now=_NOW) is None
+
+    def test_profile_scoped(self, _log_dir):
+        from awerouter.logging import append
+        for i in range(1, 61):
+            append(_log(_NOW.isoformat(), "default", i * 100, profile="cc-1"))
+            append(_log(_NOW.isoformat(), "default", 9000, profile="cc-2"))
+        cfg = AutoThresholdConfig(min_samples=50)
+        assert auto_threshold("cc-2", 0.3, cfg, now=_NOW) == (9000, 60)
+
+    def test_includes_fallback_samples(self, _log_dir):
+        """flash→pro fallback entries are still L3-decided — they calibrate too."""
+        from awerouter.logging import append
+        for i in range(50):
+            append(_log(_NOW.isoformat(), "default→fallback", 700))
+        cfg = AutoThresholdConfig(min_samples=50)
+        assert auto_threshold("cc-1", 0.3, cfg, now=_NOW) == (700, 50)

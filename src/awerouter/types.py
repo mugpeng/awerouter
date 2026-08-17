@@ -23,21 +23,37 @@ class Destination:
 
 
 @dataclass
+class AutoThresholdConfig:
+    """Policy for longContextThreshold: "auto" (routing.json settings.longContextAuto).
+
+    The threshold is the given percentile of the profile's own L3 effective-token
+    distribution over the trailing window; with fewer samples than minSamples the
+    fallbackThreshold applies (cold start must not behave erratically).
+    """
+    percentile: int = 95            # which percentile of L3 tokens becomes the threshold
+    window_days: int = 7            # only samples newer than this count
+    min_samples: int = 50           # below this many L3 samples → fallbackThreshold
+    fallback_threshold: int = 8000
+
+
+@dataclass
 class Settings:
     """Global routing settings (shared across all profiles)."""
     background_model: str = "flash"   # L2 tier-label for background → flash dest
     think_model: str = "pro"          # L2 tier-label for think → pro dest
     web_search_model: str = "pro"     # L1 web_search destination key
     search_result_discount: float = 0.3  # L3 weight of file-search (Grep/Glob/LS) result tokens; 1 = off
+    long_context_auto: AutoThresholdConfig = field(default_factory=AutoThresholdConfig)
 
 
 @dataclass
 class RoutingProfile:
     name: str                       # profile id, e.g. "cc-router-1"
     protocol: str                   # maps to a providers.json group: anthropic / openai-chat / openai-responses
-    long_context_threshold: int
+    long_context_threshold: int     # when threshold_auto: fallback until serve start resolves it
     destinations: dict[str, Destination]
     port: Optional[int] = None      # fixed listen port; --port overrides, else default 20128
+    threshold_auto: bool = False    # longContextThreshold was "auto"; resolved at serve start
 
 
 @dataclass

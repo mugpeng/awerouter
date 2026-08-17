@@ -9,7 +9,13 @@ from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
 from awerouter import __version__
-from awerouter.server import _agent_from_ua, _loopback_proxy_warning, _serve, create_app
+from awerouter.server import (
+    _agent_from_ua,
+    _loopback_proxy_warning,
+    _resolve_auto_threshold,
+    _serve,
+    create_app,
+)
 from awerouter.types import Destination, Provider, RoutingProfile, Settings
 
 
@@ -537,6 +543,56 @@ class TestAgentFromUA:
 
     def test_empty(self):
         assert _agent_from_ua("") == ""
+
+
+class TestResolveAutoThreshold:
+    """longContextThreshold: "auto" materializes at serve start from the
+    profile's own log (module autouse fixture isolates AWEROUTER_LOG_DIR)."""
+
+    def _auto_profile(self):
+        return RoutingProfile(
+            name="test",
+            protocol="anthropic",
+            long_context_threshold=8000,
+            destinations={
+                "flash": Destination("stepfun", "step-3.5-flash"),
+                "pro": Destination("anthropic", "claude-opus-5"),
+            },
+            threshold_auto=True,
+        )
+
+    def _seed_l3(self, tokens):
+        from datetime import datetime, timezone
+        from awerouter.logging import append
+        from awerouter.types import RequestLog
+        ts = datetime.now(timezone.utc).isoformat()
+        for i, t in enumerate(tokens):
+            append(RequestLog(
+                ts=ts, request_id=f"r{i}", model_in="auto", label="default",
+                destination="flash", provider="stepfun", model_out="sf-flash",
+                status=200, ms=1, bytes=1, token_count=t, profile="test",
+                protocol="anthropic", agent="claude-code",
+            ))
+
+    def test_manual_profile_untouched(self):
+        line = _resolve_auto_threshold(ROUTING, SETTINGS)
+        assert line is None
+        assert ROUTING.long_context_threshold == 32
+
+    def test_resolves_from_own_log(self):
+        profile = self._auto_profile()
+        self._seed_l3(list(range(100, 10001, 100)))  # 100 samples, 100..10,000
+        line = _resolve_auto_threshold(profile, SETTINGS)
+        assert line is not None
+        assert "p95 of 100 L3 requests" in line
+        assert profile.long_context_threshold == 9500
+
+    def test_insufficient_samples_keeps_fallback(self):
+        profile = self._auto_profile()
+        self._seed_l3([100, 200])
+        line = _resolve_auto_threshold(profile, SETTINGS)
+        assert "fallbackThreshold 8,000" in line
+        assert profile.long_context_threshold == 8000
 
 
 class TestLoopbackProxyWarning:

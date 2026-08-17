@@ -2,7 +2,13 @@
   "settings": {
     "backgroundModel": "flash",
     "thinkModel": "pro",
-    "webSearchModel": "pro"
+    "webSearchModel": "pro",
+    "longContextAuto": {
+      "percentile": 95,
+      "windowDays": 7,
+      "minSamples": 50,
+      "fallbackThreshold": 8000
+    }
   },
   "cc-router-1": {
     "protocol": "anthropic",
