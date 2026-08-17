@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.3.8 - 2026-08-17
+
+### Added
+- `settings.searchResultDiscount` (default `0.3`): file-search tool results (Grep/Glob/LS) are now discounted when L3 scores request difficulty. Bulk search hits inflate context cheaply, so they no longer alone push a request to pro.
+
+### Changed
+- L3 difficulty scoring now uses `effective_tokens(token_count, file_search_tokens, discount)` instead of raw `token_count`, so flash can carry longer conversations that include file-search results.
+- `usage calibrate` now prints the active `searchResultDiscount` so threshold tuning matches the actual scoring rule.
+
 ## v0.3.7 - 2026-08-17
 
 ### Added
