@@ -518,8 +518,9 @@ def _usage_tokens(since, profile_name):
 def calibrate(since, profile_name):
     """Tune longContextThreshold from the L3 token distribution.
 
-    Only L3 traffic (default/longContext/image labels) is threshold-sensitive;
-    L1 (webSearch) and L2 (background/think) route identically regardless.
+    Only threshold-sensitive traffic counts (default/longContext/image/
+    toolSearch labels); webSearch, background/think, and toolEdit route
+    identically regardless of where the threshold sits.
     """
     from awerouter.logging import auto_threshold, token_distribution
     cutoff = _window_cutoff(since, profile_name)

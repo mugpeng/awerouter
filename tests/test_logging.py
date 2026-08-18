@@ -429,6 +429,18 @@ class TestTokenDistribution:
         d = token_distribution()
         assert d == {}
 
+    def test_tool_phase_labels(self, _log_dir):
+        """toolSearch flips flash/pro with the threshold exactly like default,
+        so it feeds calibration (fallback suffix included); toolEdit is pro at
+        any threshold, so it stays out."""
+        from awerouter.logging import append
+        append(_log("t1", "toolSearch", 10))
+        append(_log("t2", "toolEdit", 500))
+        append(_log("t3", "toolSearch→fallback", 50))
+        d = token_distribution()
+        assert d["n"] == 2
+        assert (d["min"], d["max"]) == (10, 50)
+
     def test_includes_l3_labels(self, _log_dir):
         from awerouter.logging import append
         append(_log("t1", "default", 10))

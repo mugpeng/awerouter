@@ -138,8 +138,10 @@ def effective_tokens(token_count: int, file_search_tokens: int, discount: float 
     """token_count with file-search result tokens weighed at `discount`.
 
     What L3 compares against longContextThreshold. Both inputs only grow
-    under append-only history, so the result does too: a session crosses
-    flash -> pro at most once (no flip-flop, prefix caches survive).
+    under append-only history, so the result does too: the L3 crossing is
+    one-way flash -> pro. Below the threshold the destination can still
+    alternate — L4 tool-phase routing sends edit turns to pro and the next
+    search turn back to flash (see router.py).
     """
     return token_count - int(file_search_tokens * (1.0 - discount))
 

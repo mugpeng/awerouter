@@ -217,7 +217,7 @@ First-match-wins pipeline, evaluated per request:
 
 CC's `/model` picker sets the tier model id (c1/flash / c1/pro / c1/think). awerouter reads it and routes accordingly — no keyword parsing, no LLM classifier.
 
-L4 keys on what the agent just did: search results feed cheap mechanical next steps (list the next glob, read a hit), while a fresh edit means code is being written or verified. It sits below L3 on purpose — a session already above `longContextThreshold` stays pro no matter which tool just ran, so flash never sees contexts it may degrade on and the one-way flash→pro session invariant holds. Search-class tool names reuse the same set as the `searchResultDiscount` detection (claude-code's `Grep`/`Glob`/`LS`, opencode's `grep`/`glob`/`list`); edit-class covers `Edit`/`Write`/`NotebookEdit`/`apply_patch`/`replace_in_file` and friends, matched case-insensitively.
+L4 keys on what the agent just did: search results feed cheap mechanical next steps (list the next glob, read a hit), while a fresh edit means code is being written or verified. It sits below L3 on purpose — a session already above `longContextThreshold` stays pro no matter which tool just ran, so flash never sees contexts it may degrade on and the long-context crossing stays one-way flash→pro (below the threshold, sessions may alternate flash↔pro by phase). Search-class tool names reuse the same set as the `searchResultDiscount` detection (claude-code's `Grep`/`Glob`/`LS`, opencode's `grep`/`glob`/`list`); edit-class covers `Edit`/`Write`/`NotebookEdit`/`apply_patch`/`replace_in_file` and friends, matched case-insensitively.
 
 ## Commands
 

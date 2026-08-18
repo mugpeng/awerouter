@@ -19,7 +19,7 @@ from awerouter.config import (
     redact,
     validate_profiles,
 )
-from awerouter.types import Destination, Provider, RoutingProfile, Settings
+from awerouter.types import Destination, Provider, RoutingProfile, Settings, ToolRoutingConfig
 
 
 # ---------------------------------------------------------------------------
@@ -575,6 +575,16 @@ class TestFormatDisplay:
         }
         data = json.loads(format_routing_display(settings, profiles))
         assert data["cc-1"]["port"] == 20129
+
+    def test_routing_shows_tool_routing(self):
+        settings = Settings(tool_routing=ToolRoutingConfig(search=None, edit="pro"))
+        profiles = {
+            "cc-1": RoutingProfile("cc-1", "anthropic", 8000, {
+                "flash": Destination("p", "m1"), "pro": Destination("p", "m2"),
+            }),
+        }
+        data = json.loads(format_routing_display(settings, profiles))
+        assert data["settings"]["toolRouting"] == {"search": None, "edit": "pro"}
 
     def test_routing_shows_auto_threshold(self):
         settings = Settings()

@@ -434,8 +434,10 @@ def clear_logs() -> list:
 
 
 # L3 labels: threshold-sensitive (decided by token_count vs longContextThreshold).
-# L1 (webSearch) and L2 (background/think) route the same regardless of threshold.
-_L3_LABELS = frozenset({"default", "longContext", "image"})
+# toolSearch flips flash/pro with the threshold exactly like default, so it
+# belongs here; excluded labels route the same at any threshold — L1 (webSearch),
+# L2 (background/think), and toolEdit (pro below via L4, pro above via longContext).
+_L3_LABELS = frozenset({"default", "longContext", "image", "toolSearch"})
 _FALLBACK_SUFFIX = "→fallback"
 
 
@@ -452,9 +454,9 @@ def _l3_tokens(since=None, profile=None, discount: float = 0.3) -> list:
     """Sorted effective-token samples of L3 traffic for calibrating
     longContextThreshold.
 
-    Only L3 requests are threshold-sensitive; L1/L2 route identically no matter
-    where the threshold sits. File-search result tokens are weighed at
-    `discount` — the same number L3 compares.
+    Only threshold-sensitive requests count; labels that route identically no
+    matter where the threshold sits (L1/L2, toolEdit) are skipped. File-search
+    result tokens are weighed at `discount` — the same number L3 compares.
     """
     f = _log_file()
     if not f.exists():
@@ -490,7 +492,7 @@ def token_distribution(since=None, profile=None, discount: float = 0.3) -> dict:
         return tokens[idx]
 
     def count_below(threshold: int) -> int:
-        # number of requests that would go flash (default) at this threshold
+        # requests that would go flash (default/toolSearch) at this threshold
         return sum(1 for t in tokens if t <= threshold)
 
     return {

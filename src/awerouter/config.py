@@ -433,6 +433,10 @@ def format_routing_display(settings: Settings, profiles: dict[str, RoutingProfil
             "thinkModel": settings.think_model,
             "webSearchModel": settings.web_search_model,
             "searchResultDiscount": settings.search_result_discount,
+            "toolRouting": {
+                "search": settings.tool_routing.search,
+                "edit": settings.tool_routing.edit,
+            },
             "longContextAuto": {
                 "percentile": settings.long_context_auto.percentile,
                 "windowDays": settings.long_context_auto.window_days,

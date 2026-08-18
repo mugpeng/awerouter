@@ -6,14 +6,14 @@ New L4 routing layer: what the agent just did decides where the next turn goes. 
 
 ### Added
 - `InspectResult.last_tool`: lowercased name of the most recent tool call in the resent history, extracted per protocol (anthropic `tool_use`, openai-chat `tool_calls`, openai-responses `function_call`).
-- L4 tool-phase routing in `router.py`, below L3: search-class → `settings.toolRouting.search` (default flash), edit-class → `settings.toolRouting.edit` (default pro), with labels `toolSearch`/`toolEdit`. Both labels are excluded from L3 calibration (forced, threshold-insensitive decisions).
+- L4 tool-phase routing in `router.py`, below L3: search-class → `settings.toolRouting.search` (default flash), edit-class → `settings.toolRouting.edit` (default pro), with labels `toolSearch`/`toolEdit`. `toolEdit` is excluded from L3 calibration (pro at any threshold); `toolSearch` stays in — it flips flash/pro with the threshold exactly like `default`.
 - `settings.toolRouting` in routing.json: `{"search": "flash", "edit": "pro"}` — destination keys or `null` to disable a rule; block absent = both defaults on. Invalid values die with a clear message.
 - `EDIT_TOOLS` name set (edit/write/multiedit/notebook_edit/apply_patch/str_replace/replace_in_file/write_to_file/apply_diff/create_file, case-insensitive); search-class reuses `FILE_SEARCH_TOOLS`.
 - Serve banner prints the active mapping (`tool-phase -> search→flash  edit→pro`).
 - Tests: last_tool extraction per protocol, L4 decisions and precedence (L3 long-context beats tool-flash; L1 web_search beats tool-edit), rule disabling, config parsing.
 
 ### Design notes
-- L4 sits below L3 on purpose: sessions above `longContextThreshold` stay pro regardless of the last tool, so flash never sees very long contexts and the one-way flash→pro session invariant survives.
+- L4 sits below L3 on purpose: sessions above `longContextThreshold` stay pro regardless of the last tool, so flash never sees very long contexts and the long-context crossing stays one-way flash→pro.
 - Read-class tools are deliberately not classified: after reads the next turn often writes code, and rising read volume already crosses L3 to pro before that turn.
 - Sub-threshold sessions now alternate flash↔pro by phase (search → flash, edit → pro); within the cache TTL this alternation is cheap — monitor it with `usage savings` (alternations / expired pro gaps).
 
