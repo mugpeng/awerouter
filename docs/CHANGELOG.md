@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.4.1 - 2026-08-18
+
+awerouter can now upgrade itself and tells you when a new release is out. The serve banner also stops recommending the chat wire that Codex removed.
+
+### Added
+- `awerouter self-update [--check]`: upgrades to the latest PyPI release — pipx-managed installs run `pipx upgrade awerouter`, everything else `pip install --upgrade`; `--check` shows versions only.
+- `update_check.py`: background PyPI check after every command (at most once a day, cached as `update-check.json` in the config dir; `AWEROUTER_NO_UPDATE_CHECK=1` disables it). A newer release prints a one-line reminder after the command finishes, throttled to once a day. `serve` keeps the check enabled so long sessions still refresh the cache, and the reminder printing after Ctrl-C is the natural moment to upgrade.
+- Serve banner shows an update hint (`update available: x → y  (awerouter self-update)`) from the cached check — no network, no thread, may lag the newest release by a day.
+- Tests: `test_update_check.py` covers version comparison, skip rules, cache freshness/remind throttling, the kill switch, the banner hint, and the `self-update` command (`--check`, up-to-date, installer invocation).
+
+### Changed
+- Serve banner no longer tells Codex users on an openai-chat profile to set `wire_api = "chat"` — Codex 0.122+ rejects it. It now says to point Codex at an openai-responses profile; openai-responses profiles keep the `wire_api = "responses"` hint. The old-`agent`-field migration message in `config.py` matches.
+
 ## v0.4.0 - 2026-08-17
 
 awerouter now detects file-search tools wrapped inside shell commands (Codex `exec_command` / `shell`), and usage commands surface the discounted file-search token counts alongside raw totals.
