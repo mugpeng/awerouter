@@ -29,7 +29,7 @@ The router is a first-match-wins pipeline. Each layer asks one question, and the
 | L3 Difficulty | How much content is this? | A measurement |
 | L4 Consequence | Did code just change? | A reaction |
 
-The hierarchy runs from absolute constraint down to educated guess. Hard constraints win over instructions; instructions win over measurements; measurements win over heuristics. When two layers disagree, the more certain one decides. That is the whole ordering.
+The hierarchy runs from absolute constraint down to educated guess. Hard constraints win over instructions; instructions win over measurements; measurements win over reactions. When two layers disagree, the more certain one decides. That is the whole ordering.
 
 ## Cost-First: Innocent Until Proven Expensive
 

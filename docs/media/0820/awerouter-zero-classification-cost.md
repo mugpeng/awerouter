@@ -22,7 +22,7 @@ Every request goes through a first-match-wins pipeline. Four layers, each asking
 
 **How big is this?** Token count against a threshold. If the request carries more content than the dial allows — or contains an image — route to the strong tier. This is the only layer that estimates difficulty, and the estimate is a tape measure, not a classifier.
 
-**What did the agent just do?** An agent that just ran a search is in a mechanical phase. An agent that just made an edit is writing or verifying code — high stakes. The most recent tool call is an honest signal, and it costs nothing to read.
+**Did code just change?** Structure cannot see the turn that decides an edit — by the time a tool call exists to read, the decision is already made. What it can do is react: the turn right after an edit is the review turn — verify the diff, decide the next file. That turn goes to the strong tier; the cheap one drafts, the strong one reviews. The most recent tool call is an honest signal, and it costs nothing to read.
 
 If no layer fires, the default is the cheap tier. Innocent until proven expensive.
 
@@ -33,7 +33,7 @@ Here is the core insight: everything the router needs to decide is already prese
 - The `tools` array tells you what capabilities the request needs.
 - The `model` field tells you what tier the client chose.
 - The message content tells you how much context is in play.
-- The last tool call tells you what phase the session is in.
+- The last tool call tells you whether code just changed.
 
 None of this requires interpretation. None of it requires a model call. The router reads the structure, makes a decision, and forwards the request — all in the time it takes to make one local HTTP round-trip.
 
@@ -55,7 +55,7 @@ Instead, every decision comes from facts measurable before the first byte. Zero 
 
 ## Every Decision Has a Name
 
-Every routed request gets a label: `webSearch`, `background`, `think`, `longContext`, `image`, `toolEdit`, `toolSearch`, `default` — plus `→fallback` when a cheap-tier failure was rescued.
+Every routed request gets a label: `webSearch`, `background`, `think`, `longContext`, `image`, `toolEdit`, `default` — plus `→fallback` when a cheap-tier failure was rescued.
 
 When you look at your usage analytics and see 70% `default` and 14% `longContext`, you are not looking at a black box's verdicts. You are looking at exactly which question fired, for every request, with a record kept of each one.
 

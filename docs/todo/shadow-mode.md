@@ -2,7 +2,7 @@
 
 ## 背景
 
-规则类改动（`toolRouting` 各键、`searchResultDiscount`、新增 phase 规则如 test-run→pro）
+规则类改动（`toolRouting` 各键、`searchResultDiscount`、新增检查点触发类如 test-run→pro）
 现在只能"改了再看"：
 
 1. **看不到反事实** —— 规则上线后只有新规则的结果，不知道"如果没改会怎样"；
@@ -25,14 +25,14 @@ shadow 模式补的就是这块。
 shadow vs live (last 7d):
   一致     512 (84%)
   分歧      96 (16%)   live=flash shadow=pro 71 | live=pro shadow=flash 25
-  分歧集中的 label: default→toolEdit 39, toolSearch→pro 22 ...
+  分歧集中的 label: default→longContext 39, toolEdit→default 22 ...
 ```
 
 "test-run → pro 该不该开"从"改了再看"变成"先看影子数据再决定"。
 
 ## 适用 / 不适用
 
-- ✅ 任何**路由行为**变更：新规则、改规则目标档位、调 search 折扣、调 L4 阶段判定。
+- ✅ 任何**路由行为**变更：新规则、改规则目标档位、调 search 折扣、调 L4 检查点触发类。
 - ✗ provider/端点变更（非路由决策，影子算不了）。
 - ✗ **历史重放做不了**：`requests.jsonl` 只存聚合数字，不存请求体（也不该存——体积和
   隐私都不允许）。所以影子必须**实时标注**，这就是为什么需要"跑几天"而不是"跑一遍历史"。
