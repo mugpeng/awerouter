@@ -249,6 +249,31 @@ class TestFilters:
         assert out.count(": match") == 10          # GREP_PER_FILE_MAX
         assert "+5" in out                          # remainder marker
 
+    def test_compressed_output_survives_recompression(self):
+        # tool results are resent every turn; a second pass over already
+        # compressed text must be a no-op or the provider cache prefix breaks
+        samples = [
+            "\n".join(f"{i:>5}|def fn_{i}(x): return {i}" for i in range(1, 400)),
+            "\n".join(f"{i}: import mod_{i}" for i in range(1, 400)),
+            "\n".join(f"src/m{i%6}.py:{i*3}:def h_{i}(req):" for i in range(200)),
+            "\n".join(f"./src/p{i%8}/f{i}.py" for i in range(120)),
+            "diff --git a/x.py b/x.py\n" + "".join(
+                f"@@ -{i},9 +{i},9 @@\n" + "".join(f"+l{j}\n" for j in range(20))
+                for i in range(1, 50)),
+            "On branch dev\nChanges not staged:\n" + "".join(f"  modified:   f{i}.py\n" for i in range(50)),
+            "commit abc\nAuthor: x\n\n    subj\n\n    body\n" * 40,
+            "npm warn d\n" + "Compiling p\n" * 200 + "Finished\n",
+            "p\n" + "".join(f"├── d{i}\n│  └── f{i}.py\n" for i in range(120)) + "2 dirs\n",
+        ]
+        for text in samples:
+            body = {"messages": [{"role": "tool", "tool_call_id": "c", "content": text}]}
+            rtk.compress_body(body, "openai-chat")
+            once = body["messages"][0]["content"]
+            body2 = {"messages": [{"role": "tool", "tool_call_id": "c", "content": once}]}
+            stats = rtk.compress_body(body2, "openai-chat")
+            assert body2["messages"][0]["content"] == once, text[:40]
+            assert stats.hits == [], text[:40]
+
     def test_find_groups_and_caps(self):
         files = [f"./src/deep/dir/file{i}.py" for i in range(15)]
         out = find("\n".join(files))

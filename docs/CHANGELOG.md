@@ -12,6 +12,8 @@ RTK compression fixes from real-traffic verification: read dumps were never comp
 - `READ_NUMBERED_LINE_RE` only matched Cursor's `N|content`. It now also matches opencode's `N: content` (`read.ts` emits `${n}: ${line}`; the `: ` variant requires the space so clock times don't match) and Claude Code's `N→content`.
 - `_RE_PORCELAIN` matched any line with 3+ leading spaces as git-status porcelain, so Claude Code read dumps (right-padded line numbers) were rewritten to a single "clean — nothing to commit" line. Real porcelain never has both XY slots blank (git omits unmodified entries); a lookahead now rejects that case.
 - Long unique-line blobs (codex reads files via shell `cat`/`sed`, no line numbers) hit dedup-log, saved nothing, and smart-truncate was unreachable behind it. `_compress_text` now falls back to smart-truncate when dedup-log yields no shrink and the text is ≥ 250 lines.
+- Compression is now idempotent end to end (tool results are resent every turn; any byte drift between passes would break provider cache prefixes). Fixed three drifts: grep output dropped a trailing blank line on re-detection; git-diff's 500-line cap let compacted diffs re-enter the smart-truncate fallback (cap now 240, below the 250-line gate, and the fallback skips text already carrying our compression markers); tree's truncation marker itself exceeded TREE_MAX_LINES so resent trees lost one more line per pass.
+- Test: `test_compressed_output_survives_recompression` runs every filter's output back through `compress_body` and asserts a byte-identical no-op.
 
 ## v0.4.5 - 2026-08-18
 

@@ -25,6 +25,15 @@ from awerouter.rtk.autodetect import detect_filter
 from awerouter.rtk.constants import MIN_COMPRESS_SIZE, RAW_CAP, SMART_TRUNCATE_MIN_LINES
 from awerouter.rtk.filters import dedup_log, smart_truncate
 
+# Self-describing markers our filters leave in compressed output. Already
+# compacted text must not re-enter the chain — double compression loses more
+# data and, worse, changes bytes between turns so provider cache prefixes
+# break the first time a tool result is resent.
+_COMPRESSED_MARKERS = (
+    " lines truncated", "(file continues)", "duplicate lines)",
+    "(truncated at ", "matches in ", " files in ", "[full diff: rtk",
+)
+
 
 @dataclass
 class RtkHit:
@@ -157,7 +166,10 @@ def _compress_text(text: str, stats: RtkStats, shape: str) -> str:
     # dedup-log is the generic catch-all, so a unique-line blob (file dumps
     # read via shell — codex's cat/sed reads) reaches it and saves nothing;
     # smart-truncate was upstream's intended last resort for exactly that.
+    # Text already carrying our markers was compacted by a previous pass and
+    # is left alone (see _COMPRESSED_MARKERS).
     if fn is dedup_log and len(out) >= size_in \
+            and not any(m in text for m in _COMPRESSED_MARKERS) \
             and len(text.split("\n")) >= SMART_TRUNCATE_MIN_LINES:
         truncated = safe_apply(smart_truncate, text)
         if truncated and len(truncated) < size_in:

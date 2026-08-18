@@ -423,7 +423,9 @@ def grep(input: str) -> str:
         if len(matches) > GREP_PER_FILE_MAX:
             out += f"  +{len(matches) - GREP_PER_FILE_MAX}\n"
         out += "\n"
-    return out
+    # no trailing blank: resent history must survive dedup-log detection
+    # unchanged, or the provider cache prefix breaks on the first re-send
+    return out.rstrip("\n")
 
 
 grep.filter_name = "grep"  # type: ignore[attr-defined]
@@ -615,8 +617,11 @@ def tree(input: str) -> str:
         filtered.pop()
 
     if len(filtered) > TREE_MAX_LINES:
-        cut = len(filtered) - TREE_MAX_LINES
-        return "\n".join(filtered[:TREE_MAX_LINES]) + f"\n... +{cut} more lines"
+        # keep TREE_MAX_LINES - 1 lines so output (marker included) fits the
+        # cap — otherwise a resent tree gets re-truncated by one line per pass
+        keep = TREE_MAX_LINES - 1
+        cut = len(filtered) - keep
+        return "\n".join(filtered[:keep]) + f"\n... +{cut} more lines"
     return "\n".join(filtered)
 
 

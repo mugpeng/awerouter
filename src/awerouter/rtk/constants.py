@@ -13,7 +13,11 @@ RAW_CAP = 10 * 1024 * 1024
 DETECT_WINDOW = 1024
 
 GIT_DIFF_HUNK_MAX_LINES = 100     # git-diff: per-hunk line cap
-GIT_DIFF_MAX_LINES = 500          # git-diff: total output line cap
+# Upstream caps git-diff at 500 total lines, but output must stay below
+# SMART_TRUNCATE_MIN_LINES: compacted diffs are resent every turn, and a
+# 250+ line summary would re-enter the generic smart-truncate fallback on
+# the next pass — losing more data and breaking provider cache prefixes.
+GIT_DIFF_MAX_LINES = 240
 GIT_LOG_MAX_LINES = 200           # git-log: line cap
 DEDUP_LINE_MAX = 2000             # dedup-log: truncation cap
 
