@@ -807,4 +807,4 @@ class TestRtk:
             await task
         asyncio.run(t())
         out = capsys.readouterr().out
-        assert "rtk" in out and "x-awerouter-token-saver" in out
+        assert "rtk" in out and "tool-result compression" in out

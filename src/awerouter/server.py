@@ -595,8 +595,7 @@ async def _serve(host: str, port: int, providers: dict, profile, settings,
     if profile.port is not None:
         print(f"  port          -> {profile.port} (from routing.json; --port overrides)")
     if profile.rtk:
-        print(f"  rtk           -> on (tool-result compression; "
-              f"opt out per request: {TOKEN_SAVER_HEADER}: off)")
+        print(f"  rtk           -> on (tool-result compression)")
     print(f"  bg            -> {settings.background_model}  "
           f"think -> {settings.think_model}  "
           f"main -> auto")
