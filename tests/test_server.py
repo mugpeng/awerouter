@@ -689,3 +689,122 @@ class TestServePortBinding:
             assert f"listening on 127.0.0.1:{port + 1}" in out
         finally:
             s.close()
+
+
+class TestRtk:
+    """rtk compression: opt-in per profile, applied before upstream forwarding."""
+
+    # grep output that genuinely shrinks under the grep filter (few files, many hits)
+    PAYLOAD = "\n".join(f"src/file{i % 3}.py:{i * 4 + 1}:def helper_{i}()" for i in range(45))
+
+    def _rtk_profile(self):
+        return RoutingProfile("test", "anthropic", 32, {
+            "flash": Destination("stepfun", "step-3.5-flash"),
+            "pro": Destination("anthropic", "claude-opus-5"),
+        }, rtk=True)
+
+    def _body(self):
+        return {"model": "auto", "messages": [
+            {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": "t1", "content": self.PAYLOAD},
+            ]},
+        ]}
+
+    def _upstream_capture(self, captured: dict):
+        async def up(request):
+            body = await request.json()
+            captured["content"] = body["messages"][0]["content"][0]["content"]
+            return web.json_response({"model": body["model"]})
+
+        up_app = web.Application()
+        up_app.router.add_post("/v1/messages", up)
+        return TestServer(up_app)
+
+    def test_compressed_before_upstream(self):
+        captured = {}
+
+        async def t():
+            up_server = self._upstream_capture(captured)
+            await up_server.start_server()
+            try:
+                app = create_app(_providers(up_server.port), self._rtk_profile(), SETTINGS)
+                async with TestClient(TestServer(app)) as c:
+                    r = await c.post("/v1/messages", json=self._body())
+                    assert r.status == 200
+            finally:
+                await up_server.close()
+        run(t())
+        assert captured["content"] != self.PAYLOAD
+        assert "matches in" in captured["content"]  # grep filter output shape
+        from awerouter.logging import tail
+        assert tail(1)[0].rtk_saved > 0
+
+    def test_bypass_header_off(self):
+        captured = {}
+
+        async def t():
+            up_server = self._upstream_capture(captured)
+            await up_server.start_server()
+            try:
+                app = create_app(_providers(up_server.port), self._rtk_profile(), SETTINGS)
+                async with TestClient(TestServer(app)) as c:
+                    r = await c.post("/v1/messages", json=self._body(),
+                                     headers={"x-awerouter-token-saver": "off"})
+                    assert r.status == 200
+            finally:
+                await up_server.close()
+        run(t())
+        assert captured["content"] == self.PAYLOAD
+        from awerouter.logging import tail
+        assert tail(1)[0].rtk_saved == 0
+
+    def test_default_off_is_transparent(self):
+        captured = {}
+
+        async def t():
+            up_server = self._upstream_capture(captured)
+            await up_server.start_server()
+            try:
+                app = create_app(_providers(up_server.port), ROUTING, SETTINGS)  # rtk not set
+                async with TestClient(TestServer(app)) as c:
+                    r = await c.post("/v1/messages", json=self._body())
+                    assert r.status == 200
+            finally:
+                await up_server.close()
+        run(t())
+        assert captured["content"] == self.PAYLOAD
+
+    def test_count_tokens_compressed_consistently(self):
+        captured = {}
+
+        async def t():
+            async def up(request):
+                body = await request.json()
+                captured["content"] = body["messages"][0]["content"][0]["content"]
+                return web.json_response({"token_count": 5})
+
+            up_app = web.Application()
+            up_app.router.add_post("/v1/messages/count_tokens", up)
+            up_server = TestServer(up_app)
+            await up_server.start_server()
+            try:
+                app = create_app(_providers(up_server.port), self._rtk_profile(), SETTINGS)
+                async with TestClient(TestServer(app)) as c:
+                    r = await c.post("/v1/messages/count_tokens", json=self._body())
+                    assert r.status == 200
+            finally:
+                await up_server.close()
+        run(t())
+        assert captured["content"] != self.PAYLOAD
+        assert "matches in" in captured["content"]
+
+    def test_serve_banner_mentions_rtk(self, capsys):
+        async def t():
+            task = asyncio.ensure_future(
+                _serve("127.0.0.1", 0, _providers(0), self._rtk_profile(), SETTINGS, True))
+            await asyncio.sleep(0.5)
+            task.cancel()
+            await task
+        asyncio.run(t())
+        out = capsys.readouterr().out
+        assert "rtk" in out and "x-awerouter-token-saver" in out

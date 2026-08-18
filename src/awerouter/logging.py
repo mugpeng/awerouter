@@ -65,6 +65,7 @@ def append(log: RequestLog) -> None:
             "token_count": log.token_count,
             "tokens": log.tokens,
             "file_search_tokens": log.file_search_tokens,
+            "rtk_saved": log.rtk_saved,
             "protocol": log.protocol,
             "agent": log.agent,
         }, ensure_ascii=False) + "\n")
@@ -128,6 +129,7 @@ def tail(n: int | None = 20) -> list[RequestLog]:
                 token_count=data.get("token_count", 0),
                 tokens=data.get("tokens") or {},
                 file_search_tokens=data.get("file_search_tokens", 0),
+                rtk_saved=data.get("rtk_saved", 0),
                 protocol=data.get("protocol", ""),
                 agent=data.get("agent", ""),
             ))

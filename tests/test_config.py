@@ -597,3 +597,49 @@ class TestFormatDisplay:
         assert data["cc-1"]["longContextThreshold"] == "auto"
         auto = data["settings"]["longContextAuto"]
         assert auto == {"percentile": 95, "windowDays": 7, "minSamples": 50, "fallbackThreshold": 8000}
+
+
+# ---------------------------------------------------------------------------
+# rtk profile flag
+# ---------------------------------------------------------------------------
+
+class TestRtkFlag:
+    def test_default_off(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+        _write_config(tmp_path, {}, {
+            "cc-1": {"protocol": "anthropic", "longContextThreshold": 1,
+                     "destinations": {"flash": "p,m", "pro": "p,m"}},
+        })
+        _, profiles = load_routing()
+        assert profiles["cc-1"].rtk is False
+
+    def test_true_parsed(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+        _write_config(tmp_path, {}, {
+            "cc-1": {"protocol": "anthropic", "longContextThreshold": 1,
+                     "destinations": {"flash": "p,m", "pro": "p,m"}, "rtk": True},
+        })
+        _, profiles = load_routing()
+        assert profiles["cc-1"].rtk is True
+
+    @pytest.mark.parametrize("bad", ["yes", 1, "true"])
+    def test_non_bool_dies(self, tmp_path, monkeypatch, bad):
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+        _write_config(tmp_path, {}, {
+            "cc-1": {"protocol": "anthropic", "longContextThreshold": 1,
+                     "destinations": {"flash": "p,m", "pro": "p,m"}, "rtk": bad},
+        })
+        with pytest.raises(SystemExit, match="'rtk'"):
+            load_routing()
+
+    def test_display_shows_only_when_set(self):
+        settings = Settings()
+        profiles = {
+            "off": RoutingProfile("off", "anthropic", 8000, {
+                "flash": Destination("p", "m1"), "pro": Destination("p", "m2")}),
+            "on": RoutingProfile("on", "anthropic", 8000, {
+                "flash": Destination("p", "m1"), "pro": Destination("p", "m2")}, rtk=True),
+        }
+        data = json.loads(format_routing_display(settings, profiles))
+        assert "rtk" not in data["off"]
+        assert data["on"]["rtk"] is True

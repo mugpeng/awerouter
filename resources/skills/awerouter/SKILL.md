@@ -19,7 +19,7 @@ This skill covers **configuring** awerouter routing, inspecting profiles, and in
 
 ## Core Concepts
 
-awerouter is a transparent same-protocol proxy for coding-agent traffic. It does not rewrite request bodies or translate between protocols.
+awerouter is a transparent same-protocol proxy for coding-agent traffic. It does not translate between protocols. Request bodies pass through untouched unless a profile opts into `rtk` tool-result compression.
 
 Key config dir: `~/.config/awerouter/` (override with `AWEROUTER_CONFIG_DIR`).
 Request log dir: `~/.local/state/awerouter/` (override with `AWEROUTER_LOG_DIR`).
@@ -98,6 +98,7 @@ Rules:
 - `settings` is optional.
 - Each profile needs `protocol`, `longContextThreshold`, and `destinations`.
 - Supported protocols: `anthropic`, `openai-chat`, `openai-responses`.
+- Optional `"rtk": true` enables RTK tool-result compression (default off): verbose tool output (git diff/status/log, grep, listings, build logs) is compressed before forwarding. Fail-open, deterministic; error results and short content pass through. Per-request opt-out header: `X-Awerouter-Token-Saver: off`. After enabling, re-run `awerouter usage calibrate` (thresholds tuned on uncompressed traffic over-trigger pro).
 
 ## Routing Logic
 

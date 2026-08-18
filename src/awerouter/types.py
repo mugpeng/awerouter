@@ -69,6 +69,7 @@ class RoutingProfile:
     destinations: dict[str, Destination]
     port: Optional[int] = None      # fixed listen port; --port overrides, else default 20128
     threshold_auto: bool = False    # longContextThreshold was "auto"; resolved at serve start
+    rtk: bool = False               # compress tool_result content before routing (opt-in)
 
 
 @dataclass
@@ -115,3 +116,4 @@ class RequestLog:
     agent: str = ""                           # normalized client identity from the User-Agent header
     tokens: dict = field(default_factory=dict)  # per-type input-token breakdown; sum == token_count (pre-breakdown logs: empty)
     file_search_tokens: int = 0                  # estimated tokens of file-search tool results (0 = none / legacy log)
+    rtk_saved: int = 0                           # estimated input tokens saved by rtk compression (0 = off / none / legacy log)

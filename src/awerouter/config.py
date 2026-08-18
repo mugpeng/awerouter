@@ -277,6 +277,9 @@ def load_routing(path: Optional[Path] = None) -> tuple[Settings, dict[str, Routi
         if port_raw is not None:
             if isinstance(port_raw, bool) or not isinstance(port_raw, int) or not 1 <= port_raw <= 65535:
                 die(f"profile '{name}': 'port' must be an integer in 1-65535, got: {port_raw!r}")
+        rtk_raw = body.get("rtk", False)
+        if not isinstance(rtk_raw, bool):
+            die(f"profile '{name}': 'rtk' must be true or false, got: {rtk_raw!r}")
         dests_raw = body["destinations"]
         if not isinstance(dests_raw, dict):
             die(f"profile '{name}' destinations must be an object")
@@ -308,6 +311,7 @@ def load_routing(path: Optional[Path] = None) -> tuple[Settings, dict[str, Routi
             destinations=parsed,
             port=port_raw,
             threshold_auto=threshold_auto,
+            rtk=rtk_raw,
         )
     return settings, profiles
 
@@ -452,6 +456,8 @@ def format_routing_display(settings: Settings, profiles: dict[str, RoutingProfil
         }
         if p.port is not None:
             entry["port"] = p.port
+        if p.rtk:
+            entry["rtk"] = True
         entry["destinations"] = {
             k: f"{v.provider_name},{v.model}" for k, v in p.destinations.items()
         }

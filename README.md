@@ -24,7 +24,7 @@
   </p>
 </div>
 
-> Transparent proxy that splits coding-agent traffic across providers by cost and capability. Same-protocol passthrough — no translation.
+> Transparent proxy that splits coding-agent traffic across providers by cost and capability. Same-protocol passthrough — no translation. Optional per-profile tool-result compression (RTK, off by default).
 
 ## Support Tools
 
@@ -218,6 +218,27 @@ First-match-wins pipeline, evaluated per request:
 CC's `/model` picker sets the tier model id (c1/flash / c1/pro / c1/think). awerouter reads it and routes accordingly — no keyword parsing, no LLM classifier.
 
 L4 keys on what the agent just did: search results feed cheap mechanical next steps (list the next glob, read a hit), while a fresh edit means code is being written or verified. It sits below L3 on purpose — a session already above `longContextThreshold` stays pro no matter which tool just ran, so flash never sees contexts it may degrade on and the long-context crossing stays one-way flash→pro (below the threshold, sessions may alternate flash↔pro by phase). Search-class tool names reuse the same set as the `searchResultDiscount` detection (claude-code's `Grep`/`Glob`/`LS`, opencode's `grep`/`glob`/`list`); edit-class covers `Edit`/`Write`/`NotebookEdit`/`apply_patch`/`replace_in_file` and friends, matched case-insensitively.
+
+## Token Saver (RTK)
+
+Coding agents resubmit the whole conversation every turn, and most of it is tool output — git diffs, grep hits, directory listings, build logs. A profile can opt into RTK compression, which rewrites that text in place before routing and forwarding:
+
+```json
+"cc-router-1": {
+  "protocol": "anthropic",
+  "longContextThreshold": 8000,
+  "rtk": true,
+  "destinations": { "flash": "stepfun,step-3.7-flash", "pro": "anthropic,claude-opus-5" }
+}
+```
+
+- **What it touches:** `tool_result` / tool-message content only — never user prompts or model replies. Rule-based filters (git diff/status/log, grep, find, tree, ls, build output, …) auto-detect the format and compress it; unrecognized content, anything under 500 chars, and error results (`is_error`) pass through untouched.
+- **Fail-open:** any failure leaves the body as-is — the worst case is fewer tokens saved, never a broken request.
+- **Deterministic:** the same history compresses to the same bytes every turn, so provider prompt-cache prefixes survive.
+- **Per-request escape hatch:** send `X-Awerouter-Token-Saver: off` to forward one request uncompressed (e.g. debugging an agent that needs full diff/log detail).
+- Compression runs before routing, and `/v1/messages/count_tokens` is compressed too, so L3 decisions and usage logs match what is actually billed. After enabling RTK, re-run `usage calibrate` — a threshold tuned on uncompressed traffic over-triggers pro (`"auto"` self-corrects after its window).
+
+Compression is a port of [rtk](https://github.com/rtk-ai/rtk) (Apache 2.0) via 9router's JS port (MIT); the request log records the estimated saved tokens per request.
 
 ## Commands
 

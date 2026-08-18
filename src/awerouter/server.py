@@ -3,7 +3,8 @@
 Routes coding-agent requests to flash (cheap/fast) or pro (strong/accurate)
 providers based on structural request signals. Same-protocol passthrough
 proxy (anthropic / openai-chat / openai-responses); no translation, no
-request body parsing on the response path.
+request body parsing on the response path. Profiles may opt into rtk
+tool-result compression on the request path (default off).
 """
 
 from __future__ import annotations
@@ -19,12 +20,24 @@ import aiohttp
 from aiohttp import web
 
 from awerouter import __version__
+from awerouter import rtk
 from awerouter.config import die, expand_value
 from awerouter.logging import append, auto_threshold, ensure_log_dir
 from awerouter.protocols import ENDPOINT_PATHS, extract
 from awerouter.router import resolve
 from awerouter.types import RequestLog, ResolveResult
 from awerouter.update_check import cached_update_hint
+
+
+# Per-request opt-out for rtk compression (value "off" disables it), so a
+# debugging session can see raw tool output without touching routing.json.
+TOKEN_SAVER_HEADER = "x-awerouter-token-saver"
+
+
+def _rtk_enabled(request: web.Request, profile) -> bool:
+    if not profile.rtk:
+        return False
+    return request.headers.get(TOKEN_SAVER_HEADER, "").lower() != "off"
 
 
 # ---------------------------------------------------------------------------
@@ -150,11 +163,12 @@ def _resolve_for_request(body: dict, profile, settings) -> ResolveResult:
 class _RoutingState:
     """Mutable routing state shared across the retry loop."""
 
-    def __init__(self, profile, settings, body: dict, agent: str = ""):
+    def __init__(self, profile, settings, body: dict, agent: str = "", rtk_saved: int = 0):
         self.profile = profile
         self.body = body
         self.inbound_model = body.get("model") or ""
         self.agent = agent
+        self.rtk_saved = rtk_saved
         self.result = _resolve_for_request(body, profile, settings)
         self.attempt = 0
         self.streaming_started = False
@@ -178,6 +192,7 @@ def _log_failure(state: _RoutingState, request_id: str, t0: float, status: int) 
         token_count=state.result.inspect.token_count,
         tokens=state.result.inspect.token_breakdown,
         file_search_tokens=state.result.inspect.file_search_tokens,
+        rtk_saved=state.rtk_saved,
         profile=state.profile.name,
         protocol=state.profile.protocol,
         agent=state.agent,
@@ -220,7 +235,18 @@ async def _proxy_flow(request: web.Request, endpoint_protocol: str) -> web.Strea
         sock_read=None if is_stream else 120,
     )
 
-    state = _RoutingState(profile, settings, body, _agent_from_ua(request.headers.get("User-Agent", "")))
+    # rtk compression before routing: L3 decisions, effective_tokens, and the
+    # usage log then reflect what is actually sent (and billed) upstream.
+    # Runs once — retries and the flash→pro fallback reuse the same body.
+    rtk_saved = 0
+    if _rtk_enabled(request, profile):
+        stats = rtk.compress_body(body, profile.protocol)
+        line = rtk.format_log(stats)
+        if line:
+            print(line)
+        rtk_saved = stats.saved_tokens if stats else 0
+
+    state = _RoutingState(profile, settings, body, _agent_from_ua(request.headers.get("User-Agent", "")), rtk_saved)
 
     while True:
         dest_key = state.result.destination
@@ -304,6 +330,7 @@ async def _proxy_flow(request: web.Request, endpoint_protocol: str) -> web.Strea
             token_count=state.result.inspect.token_count,
             tokens=state.result.inspect.token_breakdown,
             file_search_tokens=state.result.inspect.file_search_tokens,
+            rtk_saved=state.rtk_saved,
             profile=profile.name,
             protocol=profile.protocol,
             agent=state.agent,
@@ -346,6 +373,11 @@ async def handle_count_tokens(request: web.Request) -> web.Response:
 
     body = await request.json()
     headers = _filter_headers(dict(request.headers))
+
+    # Same compression as /v1/messages: the client's context-window estimate
+    # must match what actually gets sent upstream.
+    if _rtk_enabled(request, profile):
+        rtk.compress_body(body, profile.protocol)
 
     # Resolve destination (same logic as messages)
     result = _resolve_for_request(body, profile, settings)
@@ -560,6 +592,9 @@ async def _serve(host: str, port: int, providers: dict, profile, settings,
     print(f"  protocol      -> {profile.protocol}")
     if profile.port is not None:
         print(f"  port          -> {profile.port} (from routing.json; --port overrides)")
+    if profile.rtk:
+        print(f"  rtk           -> on (tool-result compression; "
+              f"opt out per request: {TOKEN_SAVER_HEADER}: off)")
     print(f"  bg            -> {settings.background_model}  "
           f"think -> {settings.think_model}  "
           f"main -> auto  web_search -> {settings.web_search_model}")

@@ -24,7 +24,7 @@
   </p>
 </div>
 
-> 按结构信号把编码 agent 流量拆分到不同 provider，省钱不降质。同协议透传，不做协议转换。
+> 按结构信号把编码 agent 流量拆分到不同 provider，省钱不降质。同协议透传，不做协议转换。可选的 profile 级 tool-result 压缩（RTK，默认关闭）。
 
 ## 支持工具
 
@@ -218,6 +218,27 @@ first-match-wins 管线，逐请求评估：
 CC 的 `/model` 选择器设置 tier model id（c1/flash / c1/pro / c1/think）。awerouter 直接读取该字段做路由——不猜语义、不用关键词、不跑分类器。
 
 L4 按"agent 刚做了什么"判断：搜索结果之后是廉价的机械动作（再搜、读命中文件），而刚发生编辑意味着正在写代码或验证代码。它排在 L3 之下是刻意的——已超过 `longContextThreshold` 的会话无论刚跑了什么工具都留在 pro，flash 不会拿到可能退化的超长上下文，长上下文这一跨越也保持 flash→pro 单向（阈值以下则会按阶段在 flash↔pro 间交替）。搜索类工具名与 `searchResultDiscount` 检测共用同一集合（claude-code 的 `Grep`/`Glob`/`LS`、opencode 的 `grep`/`glob`/`list`）；编辑类覆盖 `Edit`/`Write`/`NotebookEdit`/`apply_patch`/`replace_in_file` 等，大小写不敏感匹配。
+
+## Token Saver（RTK 省流）
+
+编码 agent 每轮都重发全部对话历史，其中大头是工具输出——git diff、grep 命中、目录列表、构建日志。profile 可以开启 RTK 压缩，在路由和转发之前原位改写这些文本：
+
+```json
+"cc-router-1": {
+  "protocol": "anthropic",
+  "longContextThreshold": 8000,
+  "rtk": true,
+  "destinations": { "flash": "stepfun,step-3.7-flash", "pro": "anthropic,claude-opus-5" }
+}
+```
+
+- **只动 tool result：** 仅压缩 `tool_result` / tool 消息内容，绝不碰用户 prompt 和模型回复。规则式 filter（git diff/status/log、grep、find、tree、ls、构建输出等）自动识别格式并压缩；无法识别的内容、500 字符以下的短输出、错误结果（`is_error`）原样放行。
+- **fail-open：** 任何失败都保持 body 原样——最坏情况是少省一点 token，绝不会弄坏请求。
+- **确定性：** 同样的历史每轮压出同样的字节，provider 的 prompt cache prefix 不会失效。
+- **请求级逃生口：** 发送 `X-Awerouter-Token-Saver: off` 可让单个请求不压缩转发（排障、需要完整 diff/日志时用）。
+- 压缩发生在路由之前，`/v1/messages/count_tokens` 同样压缩，因此 L3 决策和用量日志与实际计费一致。开启 RTK 后建议重跑 `usage calibrate`——按未压缩流量校准的阈值会过多地触发 pro（`"auto"` 在窗口期后自愈）。
+
+压缩算法移植自 [rtk](https://github.com/rtk-ai/rtk)（Apache 2.0），经 9router 的 JS 移植版（MIT）；请求日志会记录每个请求估算省下的 token。
 
 ## 命令
 

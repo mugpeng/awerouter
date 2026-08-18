@@ -108,6 +108,24 @@ if you set longContextThreshold to:
 'auto' would set: 12,000  (p95 of 142 L3 requests, last 7d)
 ```
 
+The `longContextAuto` block controls how `"auto"` mode picks its threshold:
+
+```json
+"longContextAuto": {
+  "percentile": 75,
+  "windowDays": 7,
+  "minSamples": 10,
+  "fallbackThreshold": 10000
+}
+```
+
+| Field | Default | What it does |
+|---|---|---|
+| `percentile` | `75` | Which percentile of the observed token distribution to use as the threshold. `75` means 75% of L3 requests stay on flash. |
+| `windowDays` | `7` | How many days of traffic to analyze when the daemon starts. |
+| `minSamples` | `10` | Minimum L3 requests in the window required to trust the auto-calibrated value. If the window has fewer samples, `fallbackThreshold` is used instead. |
+| `fallbackThreshold` | `10000` | Static fallback when there aren't enough samples or the window is empty. Prevents sudden threshold swings on cold starts. |
+
 This is how you answer "is my threshold too aggressive or too conservative?" Set it to `"auto"` in `routing.json` and awerouter recalibrates from your own traffic at every serve start.
 
 ### `usage savings` — Token Economics
@@ -193,16 +211,6 @@ You can also install awerouter in one prompt by telling your agent:
 > "Read https://github.com/mugpeng/awerouter/blob/main/README.ai.md and follow it."
 
 The agent runs `pip install`, sets up the skill, initializes the config, edits `~/.zshrc`, and reports back. You start `awerouter serve` yourself.
-
-## Why It Matters
-
-The first wave of agent tools assumed a human operator. Configure meant editing JSON. Install meant `pip install` and a checklist.
-
-The second wave assumes an agent operator. Install is a task. Configure is a task. Both can be delegated. The artifact that gets delegated is not the binary — it is a readable spec the agent can execute.
-
-`README.ai.md` is that spec. The skill is the procedural layer. The `usage` commands are the feedback loop. Together they make a router that does not just work — it tells you how well it works.
-
-
 
 ## More from mugpeng
 

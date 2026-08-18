@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.4.3 - 2026-08-18
+
+Optional per-profile RTK tool-result compression: profiles with `"rtk": true` rewrite verbose tool output (git diff/status/log, grep hits, listings, build logs) in place before routing, cutting the request tokens coding-agent sessions resubmit every turn. Off by default — routing stays fully transparent unless you opt in.
+
+### Added
+- `src/awerouter/rtk/`: Python port of the RTK compression pipeline (via 9router's JS port of rtk-ai/rtk) — `autodetect.py` (12-format priority chain, 1024-char detect window), `filters.py` (git-diff, git-status, git-log, build-output, grep, find, tree, ls, search-list, read-numbered, dedup-log, smart-truncate), `apply.py` (safe_apply fail-open wrapper), `constants.py` (upstream thresholds), and `compress_body(body, protocol)` traversal for all three wire protocols (anthropic `tool_result` blocks, openai-chat `role:"tool"` messages, openai-responses `function_call_output` items).
+- `"rtk": true` profile flag in routing.json (default off; non-bool dies at load; `config show` prints it only when set).
+- Compression hook in `_proxy_flow` and `handle_count_tokens`, before routing-signal extraction: L3 decisions, `effective_tokens`, and usage logs reflect the compressed request that is actually billed. `/v1/messages/count_tokens` is compressed too, so client context estimates match reality.
+- Per-request opt-out header `X-Awerouter-Token-Saver: off`; serve banner prints `rtk -> on` with the header hint when enabled.
+- `RequestLog.rtk_saved`: estimated input tokens saved per request (0 = off/none), written to and read from requests.jsonl.
+
+### Design notes
+- Fail-open is the contract: safe_apply catches filter errors, compress_body catches traversal errors, and compress_text guards (below 500 chars / above 10 MiB untouched; empty or larger output reverts to original; `is_error` results skipped to preserve stack traces).
+- Filters are pure deterministic text transforms — the same history compresses to the same bytes every turn, so provider prompt-cache prefixes survive.
+- After enabling rtk, re-run `usage calibrate`: a threshold tuned on uncompressed traffic over-triggers pro (`"auto"` self-corrects after its window).
+
 ## v0.4.2 - 2026-08-18
 
 New L4 routing layer: what the agent just did decides where the next turn goes. Search-phase turns (Grep/Glob/LS just returned) route to flash; edit-phase turns (Edit/Write/apply_patch just ran) route to pro.
