@@ -17,11 +17,10 @@ def _cfg():
 
 
 def _resolve(model, body, threshold=32000, web_search_model="pro", search_discount=0.3,
-             tool_search_dest="flash", tool_edit_dest="pro", tool_mech_dest="flash"):
+             tool_edit_dest="pro"):
     return resolve(
         model, extract("anthropic", body), _cfg(), "flash", "think",
-        threshold, web_search_model, search_discount,
-        tool_search_dest, tool_edit_dest, tool_mech_dest,
+        threshold, web_search_model, search_discount, tool_edit_dest,
     )
 
 
@@ -473,7 +472,7 @@ def test_extract_unknown_protocol_raises():
 
 
 # ---------------------------------------------------------------------------
-# Three-layer routing (signals via anthropic bodies; L-logic is protocol-blind)
+# Routing pipeline (signals via anthropic bodies; L-logic is protocol-blind)
 # ---------------------------------------------------------------------------
 
 
@@ -531,7 +530,7 @@ class TestResolve:
                 {"type": "tool_result", "tool_use_id": "t1", "content": "x" * 500},
             ]},
         ]}
-        r = _resolve("auto", body, threshold=100, tool_search_dest=None)  # raw 126 tokens, effective ~39
+        r = _resolve("auto", body, threshold=100)  # raw 126 tokens, effective ~39
         assert r.destination == "flash"
         assert r.label == "default"
 
@@ -621,8 +620,9 @@ class TestResolve:
         assert r.label == "think"
 
 
-class TestResolveToolPhase:
-    """L4: the most recent tool call forces the destination (below L3)."""
+class TestResolveEditCheckpoint:
+    """L4: the turn after the trailing batch changed code goes to pro
+    (below L3). Every other phase is the flash default."""
 
     @staticmethod
     def _body(tool_name, result="x"):
@@ -635,28 +635,20 @@ class TestResolveToolPhase:
             ]},
         ]}
 
-    def test_search_phase_goes_flash(self):
-        r = _resolve("auto", self._body("Grep"))
-        assert r.destination == "flash"
-        assert r.label == "toolSearch"
-
     def test_edit_phase_goes_pro(self):
         r = _resolve("auto", self._body("Edit"))
         assert r.destination == "pro"
         assert r.label == "toolEdit"
 
-    def test_long_context_beats_search_flash(self):
-        """Above the threshold the session stays pro even on grep turns:
-        flash's capability ceiling and the one-way session invariant win.
-        Bulk comes from a Read result; Glob is the most recent call."""
+    def test_long_context_beats_edit_checkpoint(self):
+        """Above the threshold the session stays pro no matter what tool just
+        ran: flash's capability ceiling and the one-way session invariant win."""
         body = {"messages": [
             {"role": "assistant", "content": [
-                {"type": "tool_use", "id": "t1", "name": "Read", "input": {}},
-                {"type": "tool_use", "id": "t2", "name": "Glob", "input": {}},
+                {"type": "tool_use", "id": "t1", "name": "Edit", "input": {}},
             ]},
             {"role": "user", "content": [
                 {"type": "tool_result", "tool_use_id": "t1", "content": "x" * 500},
-                {"type": "tool_result", "tool_use_id": "t2", "content": "y"},
             ]},
         ]}
         r = _resolve("auto", body, threshold=100)
@@ -669,35 +661,27 @@ class TestResolveToolPhase:
         r = _resolve("auto", body)
         assert r.label == "webSearch"
 
-    def test_nonclassified_tool_falls_through(self):
-        r = _resolve("auto", self._body("Read"))
+    @pytest.mark.parametrize("tool_name", ["Read", "Grep", "Glob", "TodoWrite", "Task"])
+    def test_non_edit_phase_falls_through(self, tool_name):
+        """Search/mechanical turns are the default flash route — no rule."""
+        r = _resolve("auto", self._body(tool_name))
         assert r.destination == "flash"
         assert r.label == "default"
 
     def test_null_disables_rule(self):
-        r = _resolve("auto", self._body("Grep"), tool_search_dest=None)
-        assert r.label == "default"
         r = _resolve("auto", self._body("Edit"), tool_edit_dest=None)
         assert r.label == "default"
 
-    def test_search_dest_can_be_pro(self):
-        r = _resolve("auto", self._body("Grep"), tool_search_dest="pro")
-        assert r.destination == "pro"
-        assert r.label == "toolSearch"
-
-    def test_mechanical_phase_goes_flash(self):
-        r = _resolve("auto", self._body("TodoWrite"))
+    def test_edit_dest_can_be_flash(self):
+        r = _resolve("auto", self._body("Edit"), tool_edit_dest="flash")
         assert r.destination == "flash"
-        assert r.label == "toolMech"
-
-    def test_mechanical_null_disables(self):
-        r = _resolve("auto", self._body("Task"), tool_mech_dest=None)
-        assert r.label == "default"
+        assert r.label == "toolEdit"
 
 
 class TestTrailingBatch:
-    def test_anthropic_batch_edit_beats_search_regardless_of_order(self):
-        """A parallel batch takes its strongest phase: edit > search > mechanical."""
+    def test_anthropic_batch_any_edit_marks_it(self):
+        """A parallel batch is "edit" when any call in it changed code,
+        regardless of order — an edit matters more than the grep next to it."""
         for names in (("Grep", "Edit"), ("Edit", "Grep")):
             r = extract("anthropic", {"messages": [
                 {"role": "assistant", "content": [
@@ -708,14 +692,14 @@ class TestTrailingBatch:
             assert r.last_tools == tuple(n.lower() for n in names)
             assert r.last_phase == "edit"
 
-    def test_anthropic_batch_search_beats_mechanical(self):
+    def test_anthropic_batch_without_edit_is_blank(self):
         r = extract("anthropic", {"messages": [
             {"role": "assistant", "content": [
                 {"type": "tool_use", "id": "t1", "name": "TodoWrite", "input": {}},
                 {"type": "tool_use", "id": "t2", "name": "Grep", "input": {}},
             ]},
         ]})
-        assert r.last_phase == "search"
+        assert r.last_phase == ""
 
     def test_anthropic_later_batch_replaces_earlier(self):
         r = extract("anthropic", {"messages": [
@@ -730,7 +714,7 @@ class TestTrailingBatch:
             ]},
         ]})
         assert r.last_tools == ("grep",)
-        assert r.last_phase == "search"
+        assert r.last_phase == ""
 
     def test_anthropic_none(self):
         r = extract("anthropic", {"messages": [{"content": "hi"}]})
@@ -755,15 +739,17 @@ class TestTrailingBatch:
             {"type": "function_call_output", "call_id": "c2", "output": "spawned"},
         ]})
         assert r.last_tools == ("glob", "task")
-        assert r.last_phase == "search"   # search beats mechanical within the run
+        assert r.last_phase == ""   # no edit-class call in the run
 
     def test_responses_shell_wrapped_search_and_edit(self):
-        """codex wraps tools in exec_command; the command text decides phase."""
+        """codex wraps tools in exec_command; only the command's edit-ness
+        sets the phase (search commands still feed the L3 discount, tested
+        elsewhere)."""
         search = extract("openai-responses", {"input": [
             {"type": "function_call", "call_id": "c1", "name": "exec_command",
              "arguments": json.dumps({"cmd": "echo hi; rg -n needle ."})},
         ]})
-        assert search.last_phase == "search"
+        assert search.last_phase == ""
         edit = extract("openai-responses", {"input": [
             {"type": "function_call", "call_id": "c1", "name": "exec_command",
              "arguments": json.dumps({"cmd": "cd src && apply_patch <<'EOF'"})},

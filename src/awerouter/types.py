@@ -43,16 +43,13 @@ class ToolRoutingConfig:
     Values are destination keys ("flash"/"pro"); null disables that rule.
     "webSearch" fires when the request declares a web_search tool (capability
     guard, highest precedence); null falls back to the legacy
-    settings.webSearchModel. The phase rules key on the most recent tool call:
-    a search-phase turn (Grep/Glob/LS just returned) decides the next cheap
-    mechanical step; an edit-phase turn means code is being written or
-    verified; a mechanical turn is todo/subagent bookkeeping. Phase rules sit
-    below L3: long-context sessions stay pro.
+    settings.webSearchModel. "edit" is the L4 consequence checkpoint: the
+    turn after the trailing tool batch changed code (Edit/Write/apply_patch/
+    ...) goes to pro — flash drafts, pro reviews. It sits below L3:
+    long-context sessions stay pro.
     """
     web_search: Optional[str] = None    # None = legacy settings.webSearchModel
-    search: Optional[str] = "flash"
     edit: Optional[str] = "pro"
-    mechanical: Optional[str] = "flash"
 
 
 @dataclass
@@ -90,8 +87,8 @@ class InspectResult:
     # L3 weighs these against the threshold at settings.searchResultDiscount.
     file_search_tokens: int = 0
     # Trailing parallel batch of tool calls in the history (lowercased names,
-    # empty tuple if none) and its strongest phase ("edit"/"search"/
-    # "mechanical"/""); the tool-phase routing layer keys on them.
+    # empty tuple if none) and its strongest phase — "edit" when any call in
+    # it changed code, else ""; the L4 consequence checkpoint keys on it.
     last_tools: tuple = ()
     last_phase: str = ""
 

@@ -20,14 +20,14 @@ The router is a first-match-wins pipeline. Each layer asks one question, and the
 
 **L3 asks: how big is this, really?** Here the router measures instead of interpreting. If the request carries more content than a threshold — or contains an image, where cheap models degrade — it goes to the strong tier. This is the only layer where difficulty is *estimated*, and the estimate is deliberately crude: a token count against a dial. Not a classifier. A tape measure.
 
-**L4 asks: what phase is the session in?** The most recent tool call is a surprisingly honest signal. An agent that just ran a search is in a mechanical phase — read the next hit, list the next glob. An agent that just made an edit is in a consequential phase — code is being written or verified. Search results feed cheap next steps; fresh edits deserve the stronger model. The tool phase is the weakest signal of the four, which is exactly why it sits at the bottom.
+**L4 asks: did something just happen whose consequences deserve the strong model?** Structure cannot see the turn that *decides* an edit — by the time a tool call exists to read, the decision is already made. What structure can do is react. The turn right after code changed is the review turn: verify the diff, decide the next file, report to the user. That turn goes to pro; flash drafts, pro reviews. It is a consequence checkpoint, not a difficulty guess, and it is the weakest signal of the four — which is exactly why it sits at the bottom.
 
 | Layer | Question | Certainty |
 |---|---|---|
 | L1 Capability | Can flash do this at all? | Hard constraint |
 | L2 Intent | What tier did the client pick? | Client's explicit instruction |
 | L3 Difficulty | How much content is this? | A measurement |
-| L4 Phase | What did the agent just do? | A heuristic |
+| L4 Consequence | Did code just change? | A reaction |
 
 The hierarchy runs from absolute constraint down to educated guess. Hard constraints win over instructions; instructions win over measurements; measurements win over heuristics. When two layers disagree, the more certain one decides. That is the whole ordering.
 
@@ -35,7 +35,7 @@ The hierarchy runs from absolute constraint down to educated guess. Hard constra
 
 The default route — the one a request takes when no layer fires — is the cheap tier.
 
-This is a deliberate inversion. Most routing systems default to the strong model and demote "easy" requests. awerouter defaults to flash and promotes *justified* requests: needs a capability flash lacks, carries an explicit tier label, exceeds the difficulty threshold, or sits in an edit phase. The burden of proof sits on the request, not on your wallet.
+This is a deliberate inversion. Most routing systems default to the strong model and demote "easy" requests. awerouter defaults to flash and promotes *justified* requests: needs a capability flash lacks, carries an explicit tier label, exceeds the difficulty threshold, or follows a fresh edit. The burden of proof sits on the request, not on your wallet.
 
 The asymmetry makes sense because the failure modes are asymmetric. Sending a hard request to a weak model produces a bad answer — loud, visible, eventually noticed. Sending an easy request to a strong model produces a correct answer at triple the price — silent, invisible, compounding forever. The router biases toward the failure you can see, because the failure you cannot see is the one that costs you.
 
@@ -51,7 +51,7 @@ So search-result tokens are counted at a discount before comparison against the 
 
 Two places in the design, crossing a line is permanent — and permanence is the point.
 
-**The long-context crossing only goes up.** Once a session's effective tokens exceed the threshold, it routes to pro and stays there, regardless of what tool runs next. Below the threshold, a session may alternate — search phases to flash, edit phases to pro. Above it, the session is committed. This keeps cheap models away from context sizes they may degrade on. A router that ping-ponnged a long session back to flash for one cheap tool call would save pennies while flirting with a capability cliff.
+**The long-context crossing only goes up.** Once a session's effective tokens exceed the threshold, it routes to pro and stays there, regardless of what tool runs next. Below the threshold, the edit checkpoint may still lift individual turns — the turn after an edit goes to pro, later turns return to flash. Above it, the session is committed. This keeps cheap models away from context sizes they may degrade on. A router that ping-ponnged a long session back to flash for one cheap tool call would save pennies while flirting with a capability cliff.
 
 **Streaming never falls back.** If the cheap provider fails *before* the first byte reaches the client, the request silently retries once on the strong tier. If it fails *after* streaming has begun, no retry — bytes already sent cannot be unsent. The fallback itself follows the same philosophy as the routing: it only ever goes in the safe direction, cheap to strong, never the reverse. A strong provider's failure is terminal; there is nowhere left to escalate.
 
@@ -65,7 +65,7 @@ Instead, the router confines itself to the signals it can read honestly and chea
 
 ## Every Decision Has a Name
 
-Finally, the router labels every request it resolves: `webSearch`, `background`, `think`, `longContext`, `image`, `toolEdit`, `toolSearch`, `default` — and `→fallback` when a cheap-tier failure was rescued.
+Finally, the router labels every request it resolves: `webSearch`, `background`, `think`, `longContext`, `image`, `toolEdit`, `default` — and `→fallback` when a cheap-tier failure was rescued.
 
 This is not decoration. A structural router earns trust the same way it makes decisions: by being explainable. When you look at your usage analytics and see 70% `default` and 14% `longContext`, you are not looking at a black box's verdicts. You are looking at exactly which question fired, for every request, with a record kept of each one. Any routing decision can be replayed from its label. Any threshold can be re-tuned from the logged distribution.
 

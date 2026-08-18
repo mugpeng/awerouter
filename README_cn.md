@@ -176,9 +176,7 @@ export ANTHROPIC_BASE_URL=http://127.0.0.1:20128
     "thinkModel": "pro",
     "toolRouting": {
       "webSearch": "pro",
-      "search": "flash",
-      "edit": "pro",
-      "mechanical": "flash"
+      "edit": "pro"
     },
     "longContextAuto": {
       "percentile": 95,
@@ -218,13 +216,13 @@ first-match-wins 管线，逐请求评估：
 | L1 能力护栏 | body 含 `web_search` 工具 | `toolRouting.webSearch`（默认 **pro**；旧顶层 `webSearchModel` 仍兼容） |
 | L2 档位匹配 | `model == c1/flash` 或 `c1/think` | flash / pro |
 | L3 难度评分 | token（全部请求内容）超阈值，或含图片 | **pro**；否则继续 |
-| L4 工具阶段 | 尾部工具批次为编辑类（`edit`/`write`/`apply_patch` 等）、搜索类（`grep`/`glob`/`ls`/`list`）或机械类（`todo_write`/`task`） | 编辑 → **pro**；搜索 → **flash**；机械 → **flash**（`settings.toolRouting`，`null` 关闭该规则） |
+| L4 编辑检查点 | 尾部工具批次改写了代码（`edit`/`write`/`apply_patch` 等） | `toolRouting.edit`（默认 **pro**，`null` 关闭） |
 
 CC 的 `/model` 选择器设置 tier model id（c1/flash / c1/pro / c1/think）。awerouter 直接读取该字段做路由——不猜语义、不用关键词、不跑分类器。
 
-L4 按"agent 刚做了什么"判断：搜索结果之后是廉价的机械动作（再搜、读命中文件），而刚发生编辑意味着正在写代码或验证代码，todo/子代理属于记账动作。信号取**尾部并行批次**并取其中最强阶段（编辑 > 搜索 > 机械），所以 `[Grep, Edit]` 和 `[Edit, Grep]` 结果一致。shell 包装的调用（codex 的 `exec_command`/`shell`）按命令文本分类——搜索二进制算搜索，`apply_patch` 算编辑。它排在 L3 之下是刻意的——已超过 `longContextThreshold` 的会话无论刚跑了什么工具都留在 pro，flash 不会拿到可能退化的超长上下文，长上下文这一跨越也保持 flash→pro 单向（阈值以下则会按阶段在 flash↔pro 间交替）。搜索类工具名与 `searchResultDiscount` 检测共用同一集合（claude-code 的 `Grep`/`Glob`/`LS`、opencode 的 `grep`/`glob`/`list`）；编辑类覆盖 `Edit`/`Write`/`NotebookEdit`/`apply_patch`/`replace_in_file` 等，大小写不敏感匹配。
+L4 是后果检查点，不是难度猜测。结构信号看不到*决定*编辑的那一轮——那一轮按它之前的信号路由——但代码刚被改写的**下一轮**是审查轮（验证、继续、交代），所以送 pro：flash 起草，pro 审查。信号取**尾部并行批次**：其中任何一个编辑类调用都会标记该批次（`[Grep, Edit]` 和 `[Edit, Grep]` 结果一致）。shell 包装的调用（codex 的 `exec_command`/`shell`）按命令文本分类——`apply_patch` 算编辑。它排在 L3 之下是刻意的——已超过 `longContextThreshold` 的会话无论刚跑了什么工具都留在 pro，flash 不会拿到可能退化的超长上下文，长上下文这一跨越也保持 flash→pro 单向（阈值以下：编辑检查点轮次走 pro，其余轮次回落 flash）。编辑类覆盖 `Edit`/`Write`/`NotebookEdit`/`apply_patch`/`replace_in_file` 等，大小写不敏感匹配。早期版本在这里还把搜索/机械阶段路由到 flash；由于 flash 本来就是兜底默认，这些规则不改变任何行为，v0.4.8 已移除。
 
-所有按工具路由的规则（含 L1 的 `webSearch`）统一放在 `settings.toolRouting`（`webSearch`/`search`/`edit`/`mechanical`），serve 横幅用一行 `tool -> ...` 打印生效的映射。
+所有按工具路由的规则（含 L1 的 `webSearch`）统一放在 `settings.toolRouting`（`webSearch`/`edit`），serve 横幅用一行 `tool -> ...` 打印生效的映射。
 
 ## Token Saver（RTK 省流）
 

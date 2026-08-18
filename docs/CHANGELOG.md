@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.4.8 - 2026-08-18
+
+L4 sheds its dead weight: the search/mechanical phase rules are gone and the layer is now a single **edit checkpoint** — the turn after the trailing tool batch changed code goes to pro (flash drafts, pro reviews). Those rules defaulted to flash, which is already the fall-through, so at defaults this changes no routing outcome; what it buys is that config, docs, and the layer's name now match its behavior.
+
+### Changed
+- `router.resolve()`: L4 is one rule — `feat.last_phase == "edit"` → `toolRouting.edit` (default pro, label `toolEdit`). `toolSearch`/`toolMech` labels no longer produced; search/mechanical turns label `default`.
+- `ToolRoutingConfig` keeps only `webSearch`/`edit`. A `toolRouting` block still containing `search` or `mechanical` dies at load with instructions to delete the key — silent ignore would hide a behavior change from anyone who had set them to `pro`.
+- `_call_phase` (edit > search > mechanical ranking) replaced by `_call_is_edit`; `MECHANICAL_TOOLS` and the per-extractor `_rank` tables are gone. The trailing batch is "edit" when any call in it changed code; codex's shell-wrapped `apply_patch` still counts.
+- Serve banner `tool -> ...` line and `config show` `toolRouting` block now show `webSearch` (effective, legacy fallback resolved) and `edit`.
+- `usage calibrate` and `_L3_LABELS` keep accepting `toolSearch` so pre-0.4.8 logs still feed threshold calibration.
+
+### Behavior notes
+- At default settings routing is byte-identical (the removed rules were no-ops below L3). A config with `search: "pro"` (forcing pro on planning turns) is no longer expressible — that was converting most coding traffic to pro; if you want that, invert the profile (pro-leaning destinations or a lower threshold).
+- README/README_cn routing table and the four-layer essay rewritten: L4 is a consequence checkpoint — structure cannot see the turn that decides an edit, but the review turn after it is structurally identifiable.
+
 ## v0.4.7 - 2026-08-18
 
 RTK matures: smart-truncate keeps a skeleton of the truncated middle so the model can see what was cut and decide whether to re-read, autodetect is hardened against single-line false positives, end-to-end idempotency keeps provider cache prefixes stable across re-sends, and RTK savings are now visible in `usage` views. READMEs carry an experimental warning.

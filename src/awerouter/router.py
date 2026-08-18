@@ -6,11 +6,15 @@ protocol by awerouter.protocols):
   L1 Capability guard  — web_search tool declared -> toolRouting.webSearch (default pro)
   L2 Tier label match  — backgroundModel / thinkModel exact-match
   L3 Difficulty score  — long context / image -> pro; default -> flash (cost-first)
-  L4 Tool-phase match  — trailing tool batch: edit -> pro, search/mechanical -> flash
+  L4 Consequence check — trailing tool batch changed code -> toolRouting.edit (default pro)
 
-L4 sits below L3 on purpose: a session already above longContextThreshold
-stays pro no matter what tool just ran (flash's capability ceiling and the
-one-way flash->pro session invariant both win over tool-phase forcing).
+L4 is a consequence checkpoint, not a difficulty guess: structure cannot see
+the turn that decides an edit, but the turn right after code changed is the
+review turn (verify, continue, report), so it goes to pro — flash drafts,
+pro reviews. It sits below L3 on purpose: a session already above
+longContextThreshold stays pro no matter what tool just ran (flash's
+capability ceiling and the one-way flash->pro session invariant both win
+over the checkpoint).
 """
 
 from __future__ import annotations
@@ -28,9 +32,7 @@ def resolve(
     long_context_threshold: int,
     web_search_model: str = "pro",
     search_discount: float = 0.3,
-    tool_search_dest: str | None = "flash",
     tool_edit_dest: str | None = "pro",
-    tool_mech_dest: str | None = "flash",
 ) -> ResolveResult:
     m = model or ""
 
@@ -79,30 +81,15 @@ def resolve(
             inspect=feat,
         )
 
-    # L4: tool-phase match ------------------------------------------------
-    # What the agent just did decides what the next turn is: search results
-    # feed cheap mechanical next steps, a fresh edit means code is being
-    # written or verified, todo/task is bookkeeping. Null destination
-    # disables a rule.
+    # L4: consequence checkpoint -------------------------------------------
+    # The trailing tool batch changed code (Edit/Write/apply_patch/...): the
+    # next turn judges that change, so it earns pro. Null destination
+    # disables the rule; every other phase falls through to the flash default.
     if tool_edit_dest and feat.last_phase == "edit":
         return ResolveResult(
             destination=tool_edit_dest,
             model=dests[tool_edit_dest].model,
             label="toolEdit",
-            inspect=feat,
-        )
-    if tool_search_dest and feat.last_phase == "search":
-        return ResolveResult(
-            destination=tool_search_dest,
-            model=dests[tool_search_dest].model,
-            label="toolSearch",
-            inspect=feat,
-        )
-    if tool_mech_dest and feat.last_phase == "mechanical":
-        return ResolveResult(
-            destination=tool_mech_dest,
-            model=dests[tool_mech_dest].model,
-            label="toolMech",
             inspect=feat,
         )
 

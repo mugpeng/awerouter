@@ -460,9 +460,11 @@ def clear_logs() -> list:
 
 
 # L3 labels: threshold-sensitive (decided by token_count vs longContextThreshold).
-# toolSearch flips flash/pro with the threshold exactly like default, so it
-# belongs here; excluded labels route the same at any threshold — L1 (webSearch),
-# L2 (background/think), and toolEdit (pro below via L4, pro above via longContext).
+# toolSearch is legacy (removed in v0.4.8, its turns now label default) but
+# old logs still carry it, and those requests flip flash/pro with the
+# threshold exactly like default, so they belong here; excluded labels route
+# the same at any threshold — L1 (webSearch), L2 (background/think), and
+# toolEdit (pro below via L4, pro above via longContext).
 _L3_LABELS = frozenset({"default", "longContext", "image", "toolSearch"})
 _FALLBACK_SUFFIX = "→fallback"
 
@@ -518,7 +520,7 @@ def token_distribution(since=None, profile=None, discount: float = 0.3) -> dict:
         return tokens[idx]
 
     def count_below(threshold: int) -> int:
-        # requests that would go flash (default/toolSearch) at this threshold
+        # requests that would go flash (default; legacy toolSearch) at this threshold
         return sum(1 for t in tokens if t <= threshold)
 
     return {

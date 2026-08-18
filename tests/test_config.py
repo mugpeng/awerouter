@@ -266,26 +266,39 @@ class TestLoadRouting:
                      "destinations": {"flash": "p,m", "pro": "p,m"}},
         })
         tr = load_routing()[0].tool_routing
-        assert (tr.search, tr.edit) == ("flash", "pro")
+        assert (tr.web_search, tr.edit) == (None, "pro")
 
     def test_settings_tool_routing_null_disables(self, tmp_path, monkeypatch):
         monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
         _write_config(tmp_path, {}, {
-            "settings": {"toolRouting": {"search": None, "edit": "pro"}},
+            "settings": {"toolRouting": {"webSearch": "flash", "edit": None}},
             "cc-1": {"protocol": "anthropic", "longContextThreshold": 1,
                      "destinations": {"flash": "p,m", "pro": "p,m"}},
         })
         tr = load_routing()[0].tool_routing
-        assert (tr.search, tr.edit) == (None, "pro")
+        assert (tr.web_search, tr.edit) == ("flash", None)
 
     def test_settings_tool_routing_invalid_dies(self, tmp_path, monkeypatch):
         monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
         _write_config(tmp_path, {}, {
-            "settings": {"toolRouting": {"search": "turbo"}},
+            "settings": {"toolRouting": {"edit": "turbo"}},
             "cc-1": {"protocol": "anthropic", "longContextThreshold": 1,
                      "destinations": {"flash": "p,m", "pro": "p,m"}},
         })
         with pytest.raises(SystemExit, match="toolRouting"):
+            load_routing()
+
+    @pytest.mark.parametrize("removed_key", ["search", "mechanical"])
+    def test_settings_tool_routing_removed_keys_die(self, tmp_path, monkeypatch, removed_key):
+        """search/mechanical were removed in v0.4.8: they defaulted to flash,
+        which is already the fall-through — old configs must fail loudly."""
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+        _write_config(tmp_path, {}, {
+            "settings": {"toolRouting": {removed_key: "flash"}},
+            "cc-1": {"protocol": "anthropic", "longContextThreshold": 1,
+                     "destinations": {"flash": "p,m", "pro": "p,m"}},
+        })
+        with pytest.raises(SystemExit, match="removed"):
             load_routing()
 
     def test_settings_websearch_toolrouting_overrides_legacy(self, tmp_path, monkeypatch):
@@ -317,16 +330,6 @@ class TestLoadRouting:
         })
         with pytest.raises(SystemExit, match="webSearchModel"):
             load_routing()
-
-    def test_settings_tool_routing_mechanical(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
-        _write_config(tmp_path, {}, {
-            "settings": {"toolRouting": {"mechanical": None}},
-            "cc-1": {"protocol": "anthropic", "longContextThreshold": 1,
-                     "destinations": {"flash": "p,m", "pro": "p,m"}},
-        })
-        tr = load_routing()[0].tool_routing
-        assert (tr.search, tr.edit, tr.mechanical) == ("flash", "pro", None)
 
     @pytest.mark.parametrize("key,bad", [
         ("percentile", 0), ("percentile", 100), ("percentile", "95"), ("percentile", True),
@@ -617,14 +620,16 @@ class TestFormatDisplay:
         assert data["cc-1"]["port"] == 20129
 
     def test_routing_shows_tool_routing(self):
-        settings = Settings(tool_routing=ToolRoutingConfig(search=None, edit="pro"))
+        settings = Settings(web_search_model="pro",
+                            tool_routing=ToolRoutingConfig(web_search="flash", edit="pro"))
         profiles = {
             "cc-1": RoutingProfile("cc-1", "anthropic", 8000, {
                 "flash": Destination("p", "m1"), "pro": Destination("p", "m2"),
             }),
         }
         data = json.loads(format_routing_display(settings, profiles))
-        assert data["settings"]["toolRouting"] == {"search": None, "edit": "pro"}
+        # webSearch shows the effective value (toolRouting wins over legacy webSearchModel)
+        assert data["settings"]["toolRouting"] == {"webSearch": "flash", "edit": "pro"}
 
     def test_routing_shows_auto_threshold(self):
         settings = Settings()

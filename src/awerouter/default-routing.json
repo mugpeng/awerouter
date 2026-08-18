@@ -5,9 +5,7 @@
     "webSearchModel": "pro",
     "toolRouting": {
       "webSearch": "pro",
-      "search": "flash",
-      "edit": "pro",
-      "mechanical": "flash"
+      "edit": "pro"
     },
     "longContextAuto": {
       "percentile": 95,

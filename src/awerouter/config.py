@@ -213,7 +213,7 @@ def _parse_auto_threshold(raw) -> AutoThresholdConfig:
 
 def _parse_tool_routing(raw) -> ToolRoutingConfig:
     """settings.toolRouting: one block for every tool-keyed routing rule:
-    {"webSearch": "pro", "search": "flash", "edit": "pro", "mechanical": "flash"}.
+    {"webSearch": "pro", "edit": "pro"}.
 
     Values are destination keys or null; absent block = defaults on
     (webSearch null falls back to the legacy webSearchModel setting)."""
@@ -221,9 +221,15 @@ def _parse_tool_routing(raw) -> ToolRoutingConfig:
         return ToolRoutingConfig()
     if not isinstance(raw, dict):
         die("routing.json settings 'toolRouting' must be an object")
+    for removed in ("search", "mechanical"):
+        if removed in raw:
+            die(
+                f"routing.json settings toolRouting '{removed}' was removed: L4 is now a "
+                f"single edit checkpoint (search/mechanical routed to flash, which is "
+                f"already the default); delete the key — see CHANGELOG v0.4.8"
+            )
     cfg = ToolRoutingConfig()
-    keys = {"webSearch": "web_search", "search": "search",
-            "edit": "edit", "mechanical": "mechanical"}
+    keys = {"webSearch": "web_search", "edit": "edit"}
     for json_key, field_name in keys.items():
         value = raw.get(json_key, getattr(cfg, field_name))
         if value is not None and value not in ("flash", "pro"):
@@ -447,7 +453,7 @@ def format_routing_display(settings: Settings, profiles: dict[str, RoutingProfil
             "webSearchModel": settings.web_search_model,
             "searchResultDiscount": settings.search_result_discount,
             "toolRouting": {
-                "search": settings.tool_routing.search,
+                "webSearch": settings.tool_routing.web_search or settings.web_search_model,
                 "edit": settings.tool_routing.edit,
             },
             "longContextAuto": {

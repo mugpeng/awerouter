@@ -60,9 +60,9 @@ TOKEN_TYPES = ("system", "messages", "tools", "tool_results", "tool_calls", "thi
 
 # File-search tools whose results inflate context cheaply (match lists, not
 # prose the model must reason over). L3 weighs their tokens against the
-# threshold at a discount — see effective_tokens — and the tool-phase routing
-# layer sends their turns to flash. Names match case-insensitively:
-# claude-code sends Grep/Glob/LS, opencode sends grep/glob/list.
+# threshold at a discount — see effective_tokens. Names match
+# case-insensitively: claude-code sends Grep/Glob/LS, opencode sends
+# grep/glob/list.
 FILE_SEARCH_TOOLS = frozenset({"grep", "glob", "ls", "list"})
 
 
@@ -71,8 +71,8 @@ def _is_file_search(name) -> bool:
 
 
 # Code-modification tools: the most recent call being one of these means the
-# agent is writing or verifying code — the tool-phase routing layer sends
-# those turns to pro. Case-insensitive; covers claude-code (Edit/Write/
+# agent just changed code — the L4 consequence checkpoint sends the review
+# turn that follows to pro. Case-insensitive; covers claude-code (Edit/Write/
 # NotebookEdit), opencode (edit/write), codex (apply_patch), and common
 # openai-chat agents (replace_in_file, write_to_file, apply_diff).
 EDIT_TOOLS = frozenset({
@@ -81,27 +81,14 @@ EDIT_TOOLS = frozenset({
     "replace_in_file", "write_to_file", "apply_diff", "create_file",
 })
 
-# State-maintenance / delegation tools: updating a todo list or spawning a
-# subagent is mechanical bookkeeping — the tool-phase layer sends those turns
-# to the cheap destination. claude-code sends TodoWrite/Task, opencode
-# todo_write/task.
-MECHANICAL_TOOLS = frozenset({"todo", "todos", "todowrite", "todo_write", "task"})
 
-
-def _call_phase(name, arguments=None) -> str:
-    """Classify one tool call for the L4 routing layer: "edit" > "search" >
-    "mechanical" > "" — a parallel batch takes the strongest phase present
-    (an edit matters more than the grep next to it)."""
+def _call_is_edit(name, arguments=None) -> bool:
+    """True when one tool call changed code (named tool or codex's
+    shell-wrapped apply_patch). A trailing batch with any such call is the
+    L4 signal — an edit matters more than the grep next to it."""
     if not isinstance(name, str):
-        return ""
-    n = name.lower()
-    if n in EDIT_TOOLS or _shell_is_edit(name, arguments):
-        return "edit"
-    if n in FILE_SEARCH_TOOLS or _shell_is_search(name, arguments):
-        return "search"
-    if n in MECHANICAL_TOOLS:
-        return "mechanical"
-    return ""
+        return False
+    return name.lower() in EDIT_TOOLS or _shell_is_edit(name, arguments)
 
 
 # Shell-exec tool names whose command text decides search-ness. Codex wraps
@@ -192,8 +179,8 @@ def effective_tokens(token_count: int, file_search_tokens: int, discount: float 
     What L3 compares against longContextThreshold. Both inputs only grow
     under append-only history, so the result does too: the L3 crossing is
     one-way flash -> pro. Below the threshold the destination can still
-    alternate — L4 tool-phase routing sends edit turns to pro and the next
-    search turn back to flash (see router.py).
+    alternate — the L4 consequence checkpoint sends the turn after an edit
+    to pro and later turns back to flash (see router.py).
     """
     return token_count - int(file_search_tokens * (1.0 - discount))
 
@@ -258,11 +245,10 @@ def _extract_anthropic(body: dict) -> InspectResult:
     search_texts: list[str] = []
     last_tools: tuple = ()   # trailing parallel batch (one assistant message)
     last_phase = ""
-    _rank = {"": 0, "mechanical": 1, "search": 2, "edit": 3}
     for msg in messages:
         content = msg.get("content")
         batch: list[str] = []   # tool_use names in THIS message
-        batch_phase = ""
+        batch_edit = False
         if isinstance(content, str):
             b["messages"].append(content)
         elif isinstance(content, list):
@@ -285,14 +271,13 @@ def _extract_anthropic(body: dict) -> InspectResult:
                     tool_names[block.get("id")] = name
                     if isinstance(name, str):
                         batch.append(name.lower())
-                        phase = _call_phase(name, block.get("input"))
-                        if _rank[phase] > _rank[batch_phase]:
-                            batch_phase = phase
+                        if _call_is_edit(name, block.get("input")):
+                            batch_edit = True
                 elif btype == "thinking":
                     b["thinking"].append(block.get("thinking", ""))
         if batch:   # a later message with tool_use replaces the trailing batch
             last_tools = tuple(batch)
-            last_phase = batch_phase
+            last_phase = "edit" if batch_edit else ""
     token_count, breakdown = _summarize(b)
     return InspectResult(
         token_count=token_count,
@@ -330,7 +315,6 @@ def _extract_openai_chat(body: dict) -> InspectResult:
     search_texts: list[str] = []
     last_tools: tuple = ()   # trailing parallel batch (one assistant message)
     last_phase = ""
-    _rank = {"": 0, "mechanical": 1, "search": 2, "edit": 3}
     for msg in messages:
         role = msg.get("role")
         if role == "system":
@@ -359,7 +343,7 @@ def _extract_openai_chat(body: dict) -> InspectResult:
                 elif part.get("type") == "image_url":
                     has_image = True
         batch: list[str] = []   # tool_call names in THIS message
-        batch_phase = ""
+        batch_edit = False
         for call in msg.get("tool_calls") or []:
             if isinstance(call, dict) and isinstance(call.get("function"), dict):
                 b["tool_calls"].append(call["function"].get("arguments") or "")
@@ -367,12 +351,11 @@ def _extract_openai_chat(body: dict) -> InspectResult:
                 tool_names[call.get("id")] = name
                 if isinstance(name, str):
                     batch.append(name.lower())
-                    phase = _call_phase(name, call["function"].get("arguments"))
-                    if _rank[phase] > _rank[batch_phase]:
-                        batch_phase = phase
+                    if _call_is_edit(name, call["function"].get("arguments")):
+                        batch_edit = True
         if batch:   # a later message with tool_calls replaces the trailing batch
             last_tools = tuple(batch)
-            last_phase = batch_phase
+            last_phase = "edit" if batch_edit else ""
     token_count, breakdown = _summarize(b)
     return InspectResult(
         token_count=token_count,
@@ -427,15 +410,14 @@ def _extract_openai_responses(body: dict) -> InspectResult:
     search_texts: list[str] = []
     last_tools: tuple = ()   # trailing run of consecutive function_call items
     last_phase = ""
-    _rank = {"": 0, "mechanical": 1, "search": 2, "edit": 3}
     batch: list[str] = []
-    batch_phase = ""
+    batch_edit = False
 
     def _commit_batch():
         nonlocal last_tools, last_phase
         if batch:
             last_tools = tuple(batch)
-            last_phase = batch_phase
+            last_phase = "edit" if batch_edit else ""
 
     for item in input_value or []:
         if not isinstance(item, dict):
@@ -447,7 +429,7 @@ def _extract_openai_responses(body: dict) -> InspectResult:
                 # outputs/reasoning end the current parallel-call run
                 _commit_batch()
                 batch.clear()
-                batch_phase = ""
+                batch_edit = False
             if itype == "function_call":
                 b["tool_calls"].append(item.get("arguments") or "")
                 search_calls[item.get("call_id")] = (
@@ -456,9 +438,8 @@ def _extract_openai_responses(body: dict) -> InspectResult:
                 )
                 if isinstance(item.get("name"), str):
                     batch.append(item["name"].lower())
-                    phase = _call_phase(item.get("name"), item.get("arguments"))
-                    if _rank[phase] > _rank[batch_phase]:
-                        batch_phase = phase
+                    if _call_is_edit(item.get("name"), item.get("arguments")):
+                        batch_edit = True
             elif itype == "function_call_output":
                 text = _block_text(item.get("output"))
                 b["tool_results"].append(text)
@@ -470,7 +451,7 @@ def _extract_openai_responses(body: dict) -> InspectResult:
         # a message item also ends the current parallel-call run
         _commit_batch()
         batch.clear()
-        batch_phase = ""
+        batch_edit = False
         message_count += 1
         if isinstance(content, str):
             b["messages"].append(content)

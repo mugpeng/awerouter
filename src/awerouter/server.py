@@ -156,9 +156,7 @@ def _resolve_for_request(body: dict, profile, settings) -> ResolveResult:
         profile.long_context_threshold,
         tr.web_search or settings.web_search_model,
         settings.search_result_discount,
-        tr.search,
         tr.edit,
-        tr.mechanical,
     )
 
 
@@ -601,8 +599,7 @@ async def _serve(host: str, port: int, providers: dict, profile, settings,
           f"main -> auto")
     tr = settings.tool_routing
     parts = [f"web→{tr.web_search or settings.web_search_model}",
-             *(f"{k}→{v}" for k, v in
-               (("search", tr.search), ("edit", tr.edit), ("mechanical", tr.mechanical)) if v)]
+             *(f"{k}→{v}" for k, v in (("edit", tr.edit),) if v)]
     print(f"  tool          -> {'  '.join(parts)}")
     print(f"  flash  -> {profile.destinations['flash'].provider_name}/{profile.destinations['flash'].model}")
     print(f"  pro    -> {profile.destinations['pro'].provider_name}/{profile.destinations['pro'].model}")
