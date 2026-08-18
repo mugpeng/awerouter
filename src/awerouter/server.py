@@ -484,12 +484,9 @@ def _client_hint(protocol: str, display_host: str, port: int, settings) -> str:
             '  codex: set base_url to the same URL in config.toml '
             '(wire_api = "responses")'
         )
-    # codex 0.122+ dropped the chat wire entirely; a chat profile cannot serve
-    # it, so send codex to an openai-responses profile of the same destinations.
-    return base + (
-        '  codex: wire_api = "chat" is no longer supported (codex 0.122+) —\n'
-        "  serve an openai-responses profile and point codex at that instead"
-    )
+    # openai-chat serves non-codex OpenAI-compatible agents (opencode etc.);
+    # codex itself needs an openai-responses profile — documented in README.
+    return base
 
 
 # How far past the default port an implicit serve scans before giving up.

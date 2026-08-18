@@ -550,13 +550,11 @@ class TestClientHint:
     def _settings(self):
         return Settings(background_model="flash", think_model="pro")
 
-    def test_openai_chat_does_not_suggest_dead_codex_wire(self):
-        """codex 0.122+ rejects wire_api = "chat"; the hint must not recommend
-        setting it (mentioning its removal is fine)."""
+    def test_openai_chat_is_generic(self):
+        """openai-chat serves non-codex agents; the hint carries no codex
+        advice (codex needs an openai-responses profile — see README)."""
         hint = _client_hint("openai-chat", "127.0.0.1", 20128, self._settings())
-        assert 'config.toml (wire_api = "chat")' not in hint
-        assert "no longer supported" in hint
-        assert "openai-responses" in hint
+        assert "codex" not in hint
         assert "OPENAI_BASE_URL=http://127.0.0.1:20128/v1" in hint
 
     def test_openai_responses_keeps_codex_hint(self):
