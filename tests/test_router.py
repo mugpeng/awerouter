@@ -261,7 +261,38 @@ class TestExtractOpenAIChat:
         ]})
         assert r.file_search_tokens == 0
 
-    def test_tool_definitions_counted(self):
+    def test_file_search_accumulates_across_turns(self):
+        """file_search_tokens is a cumulative history total, like every bucket:
+        it only grows when a new search result enters the resent history, and
+        stays flat while non-search results pile up (usage-log sessions show
+        long flat stretches for exactly this reason)."""
+        turn1 = [
+            {"role": "assistant", "tool_calls": [
+                {"id": "c1", "function": {"name": "grep", "arguments": "{}"}},
+            ]},
+            {"role": "tool", "tool_call_id": "c1", "content": "hit1 hit2"},
+        ]
+        r1 = extract("openai-chat", {"messages": turn1})
+        assert r1.file_search_tokens == estimate_tokens("hit1 hit2")
+
+        turn2 = turn1 + [
+            {"role": "assistant", "tool_calls": [
+                {"id": "c2", "function": {"name": "read", "arguments": "{}"}},
+            ]},
+            {"role": "tool", "tool_call_id": "c2", "content": "whole file body"},
+        ]
+        r2 = extract("openai-chat", {"messages": turn2})
+        assert r2.file_search_tokens == r1.file_search_tokens
+        assert r2.token_breakdown["tool_results"] > r1.token_breakdown["tool_results"]
+
+        turn3 = turn2 + [
+            {"role": "assistant", "tool_calls": [
+                {"id": "c3", "function": {"name": "glob", "arguments": "{}"}},
+            ]},
+            {"role": "tool", "tool_call_id": "c3", "content": "a.py b.py"},
+        ]
+        r3 = extract("openai-chat", {"messages": turn3})
+        assert r3.file_search_tokens == estimate_tokens("hit1 hit2 a.py b.py")
         tools = [{"type": "function", "function": {"name": "get_weather", "parameters": {}}}]
         r = extract("openai-chat", {"messages": [], "tools": tools})
         assert r.token_count == estimate_tokens(json.dumps(tools, ensure_ascii=False))
