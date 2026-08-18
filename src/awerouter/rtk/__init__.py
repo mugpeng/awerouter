@@ -30,7 +30,7 @@ from awerouter.rtk.filters import dedup_log, smart_truncate
 # data and, worse, changes bytes between turns so provider cache prefixes
 # break the first time a tool result is resent.
 _COMPRESSED_MARKERS = (
-    " lines truncated", "(file continues)", "duplicate lines)",
+    " lines truncated", "duplicate lines)",
     "(truncated at ", "matches in ", " files in ", "[full diff: rtk",
 )
 

@@ -228,6 +228,8 @@ L4 按"agent 刚做了什么"判断：搜索结果之后是廉价的机械动作
 
 ## Token Saver（RTK 省流）
 
+> **⚠️ 试验性功能——所以默认关闭。** 压缩是有损的：超长文件读取只保留头尾 + 函数签名等骨架行（截断标记会注明 offset,模型可据此重读中段）;grep 每文件最多保留 10 条命中;diff 有行数上限。格式识别是启发式的，偶尔会在特殊内容上误判造成信息损失——模型通常会察觉并重读，代价是多一轮。如果发现 agent 行为异常(反复重读同一批文件、漏掉细节),关掉 RTK 或对该会话发送 `X-Awerouter-Token-Saver: off`。实际省了多少可用 `awerouter usage log` 查看。
+
 编码 agent 每轮都重发全部对话历史，其中大头是工具输出——git diff、grep 命中、目录列表、构建日志。profile 可以开启 RTK 压缩，在路由和转发之前原位改写这些文本：
 
 ```json
@@ -240,7 +242,7 @@ L4 按"agent 刚做了什么"判断：搜索结果之后是廉价的机械动作
 ```
 
 - **只动 tool result：** 仅压缩 `tool_result` / tool 消息内容，绝不碰用户 prompt 和模型回复。规则式 filter（git diff/status/log、grep、find、tree、ls、构建输出等）自动识别格式并压缩；无法识别的内容、500 字符以下的短输出、错误结果（`is_error`）原样放行。
-- **fail-open：** 任何失败都保持 body 原样——最坏情况是少省一点 token，绝不会弄坏请求。
+- **fail-open：** 任何失败（异常、filter 报错）都保持 body 原样，绝不会弄坏请求。注意这只防崩溃，不防启发式误判（见上面的警告）。
 - **确定性：** 同样的历史每轮压出同样的字节，provider 的 prompt cache prefix 不会失效。
 - **请求级逃生口：** 发送 `X-Awerouter-Token-Saver: off` 可让单个请求不压缩转发（排障、需要完整 diff/日志时用）。
 - 压缩发生在路由之前，`/v1/messages/count_tokens` 同样压缩，因此 L3 决策和用量日志与实际计费一致。开启 RTK 后建议重跑 `usage calibrate`——按未压缩流量校准的阈值会过多地触发 pro（`"auto"` 在窗口期后自愈）。

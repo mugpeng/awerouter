@@ -62,12 +62,17 @@ def detect_filter(text: str):
         return git_log
     if _RE_GIT_DIFF.search(head) or _RE_GIT_DIFF_HUNK.search(head):
         return git_diff
-    if _RE_GIT_STATUS.search(head):
+    # long-form status needs TWO marker lines: real "git status" output always
+    # has several, and a file/doc that merely mentions "On branch" once must
+    # not be eaten by the status summarizer
+    if sum(1 for _ in _RE_GIT_STATUS.finditer(head)) >= 2:
         return git_status
 
     # build output BEFORE the porcelain check: cargo's "Compiling" lines would
-    # otherwise be misread as git-status porcelain
-    if _RE_BUILD_OUTPUT.search(head):
+    # otherwise be misread as git-status porcelain. Two feature lines required
+    # — one stray "ERROR:"/"Finished x" line in an ordinary file dump must not
+    # collapse the whole file into a build summary
+    if sum(1 for _ in _RE_BUILD_OUTPUT.finditer(head)) >= 2:
         return build_output
 
     if _is_mostly_porcelain(head):

@@ -228,6 +228,8 @@ All tool-keyed rules live in one block — `settings.toolRouting` (`webSearch`/`
 
 ## Token Saver (RTK)
 
+> **⚠️ Experimental — that's why it's off by default.** Compression is lossy: long file reads keep head + tail plus a skeleton of signature lines (the marker names the offset to re-read the middle), grep keeps 10 matches per file, diffs are line-capped. Format detection is heuristic and can misfire on unusual content, which loses information — the model usually notices and re-reads, costing an extra turn. If an agent starts behaving oddly (re-reading the same files, missing detail), turn RTK off or send `X-Awerouter-Token-Saver: off` for that session. Check real savings with `awerouter usage log`.
+
 Coding agents resubmit the whole conversation every turn, and most of it is tool output — git diffs, grep hits, directory listings, build logs. A profile can opt into RTK compression, which rewrites that text in place before routing and forwarding:
 
 ```json
@@ -240,7 +242,7 @@ Coding agents resubmit the whole conversation every turn, and most of it is tool
 ```
 
 - **What it touches:** `tool_result` / tool-message content only — never user prompts or model replies. Rule-based filters (git diff/status/log, grep, find, tree, ls, build output, …) auto-detect the format and compress it; unrecognized content, anything under 500 chars, and error results (`is_error`) pass through untouched.
-- **Fail-open:** any failure leaves the body as-is — the worst case is fewer tokens saved, never a broken request.
+- **Fail-open:** any failure (exception, filter error) leaves the body as-is — never a broken request. Note this guards against crashes, not heuristic misjudgment (see the warning above).
 - **Deterministic:** the same history compresses to the same bytes every turn, so provider prompt-cache prefixes survive.
 - **Per-request escape hatch:** send `X-Awerouter-Token-Saver: off` to forward one request uncompressed (e.g. debugging an agent that needs full diff/log detail).
 - Compression runs before routing, and `/v1/messages/count_tokens` is compressed too, so L3 decisions and usage logs match what is actually billed. After enabling RTK, re-run `usage calibrate` — a threshold tuned on uncompressed traffic over-triggers pro (`"auto"` self-corrects after its window).

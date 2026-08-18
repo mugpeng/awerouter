@@ -5,6 +5,8 @@
 RTK compression fixes from real-traffic verification: read dumps were never compressed, and one detection bug actively corrupted Claude Code reads.
 
 ### Added
+- Truncation keeps a "skeleton" of the middle (ported from rtk Rust `filter.rs` smart_truncate): beyond head 120 + tail 60, up to 60 signature/import/declaration lines from the truncated middle survive, so the model can see the shape of what was cut and decide whether to re-read. The read-numbered marker now names the gap start (`re-read with offset=121`) so the model knows how to fetch the middle. Skeleton is capped so output stays below the 250-line re-truncation gate, and adjacent-duplicate-free so later dedup passes are byte-level no-ops.
+- Detection hardened against single-line false positives (inspired by rtk Rust's layered guards — as a network proxy we can't offer its raw-output tee recovery, so detection must be stricter): long-form git-status and build-output now require TWO feature lines in the detect window, closing the class where a file dump with one stray `ERROR:` / `Finished x` / `On branch` line was summarized to near-zero.
 - RTK savings surfaced in `usage` views (previously `rtk_saved` was logged but never shown): the shared header on `usage log/stats/tokens/savings` prints `rtk: saved N input tokens (x/y requests compressed)` when the window has any; `usage log` appends `rtk=+N` to entries that were compressed (`+` marks trimmed tokens, not included in `tokens=`); `usage savings` adds an rtk block noting it stacks with flash offload. Backed by `logging.rtk_totals(since, profile)`. Nothing prints when nothing was compressed.
 
 ### Fixed

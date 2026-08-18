@@ -52,6 +52,11 @@ SEARCH_LIST_TOTAL_DIR_MAX = 20
 SMART_TRUNCATE_HEAD = 120         # lines kept from the top
 SMART_TRUNCATE_TAIL = 60          # lines kept from the bottom
 SMART_TRUNCATE_MIN_LINES = 250    # only kick in above this
+# Cap on "skeleton" lines (signatures/imports) kept from the truncated
+# middle, ported from rtk Rust filter.rs. Chosen so a truncated result
+# (head + marker + skeleton + tail) stays below SMART_TRUNCATE_MIN_LINES
+# — a 250+ line output would re-enter truncation on the next pass.
+SMART_TRUNCATE_STRUCT_MAX = 60
 
 # read-numbered ("  N|content" file dumps, e.g. Cursor read_file)
 READ_NUMBERED_MIN_HIT_RATIO = 0.7

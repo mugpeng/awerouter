@@ -22,6 +22,7 @@ from awerouter.rtk.constants import (
     SEARCH_LIST_TOTAL_DIR_MAX,
     SMART_TRUNCATE_HEAD,
     SMART_TRUNCATE_MIN_LINES,
+    SMART_TRUNCATE_STRUCT_MAX,
     SMART_TRUNCATE_TAIL,
     STATUS_MAX_FILES,
     STATUS_MAX_UNTRACKED,
@@ -629,18 +630,70 @@ tree.filter_name = "tree"  # type: ignore[attr-defined]
 
 
 # ---------------------------------------------------------------------------
-# smart-truncate — keep head+tail, replace the middle
+# smart-truncate / read-numbered — keep head+tail plus a "skeleton" of the
+# middle (signatures, imports, declarations), ported from rtk Rust
+# filter.rs smart_truncate. The skeleton gives the model enough of the
+# truncated middle's shape to decide whether to re-read with an offset.
+# Optional leading line-number prefix covers "  N|", "N: ", "N→" read dumps.
 # ---------------------------------------------------------------------------
 
-def smart_truncate(input: str) -> str:
+_STRUCTURAL_RE = re.compile(
+    r"^\s*(?:\d+[|→│:]\s*)?(?:"
+    r"def |class |async def |fn |func |function |export |pub |import |use |"
+    r"mod |impl |struct |enum |trait |type |interface |package |"
+    r"#include|using |from \S+ import"
+    r")"
+)
+
+
+def _skeleton(middle: list) -> list:
+    """Structural lines from the truncated middle, adjacent-duplicate-free.
+
+    Duplicates are collapsed the same way dedup-log would on a later pass,
+    so the emitted output is a dedup fixpoint (re-sent history must not
+    change bytes between turns or provider cache prefixes break).
+    """
+    out: list[str] = []
+    for line in middle:
+        if len(out) >= SMART_TRUNCATE_STRUCT_MAX:
+            break
+        if out and line == out[-1]:
+            continue
+        if _STRUCTURAL_RE.match(line):
+            out.append(line)
+    return out
+
+
+def _truncate_with_skeleton(input: str, numbered: bool) -> str:
     lines = input.split("\n")
     if len(lines) < SMART_TRUNCATE_MIN_LINES:
         return input
 
     head = lines[:SMART_TRUNCATE_HEAD]
+    middle = lines[SMART_TRUNCATE_HEAD: len(lines) - SMART_TRUNCATE_TAIL]
     tail = lines[len(lines) - SMART_TRUNCATE_TAIL:]
-    cut = len(lines) - len(head) - len(tail)
-    return "\n".join([*head, f"... +{cut} lines truncated", *tail])
+    struct = _skeleton(middle)
+
+    marker = f"... +{len(middle)} lines truncated"
+    if struct:
+        marker += f" ({len(struct)} structural lines kept)"
+    if numbered and middle:
+        m = re.match(r"\s*(\d+)", middle[0])
+        if m:  # tell the model where the gap starts so it can re-read
+            marker += f"; re-read with offset={m.group(1)}"
+
+    out = head + [marker] + struct + tail
+    # collapse adjacent duplicates (incl. blank runs) — mirrors dedup-log, so
+    # a later dedup pass over this output is a byte-level no-op
+    collapsed = out[:1]
+    for line in out[1:]:
+        if line != collapsed[-1]:
+            collapsed.append(line)
+    return "\n".join(collapsed)
+
+
+def smart_truncate(input: str) -> str:
+    return _truncate_with_skeleton(input, numbered=False)
 
 
 smart_truncate.filter_name = "smart-truncate"  # type: ignore[attr-defined]
@@ -657,14 +710,7 @@ READ_NUMBERED_LINE_RE = re.compile(r"^\s*\d+(?:\||→|│|: )")
 
 
 def read_numbered(input: str) -> str:
-    lines = input.split("\n")
-    if len(lines) < SMART_TRUNCATE_MIN_LINES:
-        return input
-
-    head = lines[:SMART_TRUNCATE_HEAD]
-    tail = lines[len(lines) - SMART_TRUNCATE_TAIL:]
-    cut = len(lines) - len(head) - len(tail)
-    return "\n".join([*head, f"... +{cut} lines truncated (file continues)", *tail])
+    return _truncate_with_skeleton(input, numbered=True)
 
 
 read_numbered.filter_name = "read-numbered"  # type: ignore[attr-defined]

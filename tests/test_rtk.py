@@ -79,6 +79,15 @@ class TestDetectFilter:
     def test_build_output_npm(self):
         assert detect_filter("npm warn deprecated left-pad@1.0\nadded 52 packages in 3s\n") is build_output
 
+    def test_single_build_line_not_build_output(self):
+        # a script/doc with one stray build-ish line must not be summarized away
+        text = "\n".join(["npm error handler() {"] + [f"command_{i} --flag" for i in range(300)])
+        assert detect_filter(text) is not build_output
+
+    def test_single_status_line_not_git_status(self):
+        text = "\n".join(["On branch main notes"] + [f"content line {i}" for i in range(300)])
+        assert detect_filter(text) is not git_status
+
     def test_grep(self):
         assert detect_filter("src/a.py:10:def x()\nsrc/a.py:20:def y()\n") is grep
 
@@ -319,8 +328,25 @@ class TestFilters:
     def test_read_numbered(self):
         lines = [f"{i}|content {i}" for i in range(1, 301)]
         out = read_numbered("\n".join(lines))
-        assert "(file continues)" in out
+        # marker names the gap start so the model can re-read with an offset
+        assert "re-read with offset=121" in out
         assert out.split("\n")[0] == "1|content 1"
+
+    def test_truncation_keeps_middle_skeleton(self):
+        # signatures inside the truncated middle survive as a skeleton
+        lines = [f"filler {i}" for i in range(120)]
+        lines += [f"def middle_fn_{i}(): pass" for i in range(80)]
+        lines += [f"tail {i}" for i in range(60)]
+        out = read_numbered("\n".join(lines))
+        assert "def middle_fn_0" in out
+        assert "structural lines kept" in out
+
+    def test_skeleton_output_stays_below_retruncate_gate(self):
+        # head+marker+skeleton+tail must stay under SMART_TRUNCATE_MIN_LINES,
+        # or resent output re-enters truncation on the next pass
+        lines = [f"{i}|def fn_{i}(): pass" for i in range(1, 400)]
+        out = read_numbered("\n".join(lines))
+        assert len(out.split("\n")) < 250
 
     def test_search_list(self):
         text = (
