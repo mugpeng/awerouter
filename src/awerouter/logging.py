@@ -172,6 +172,30 @@ def token_totals(since=None, profile=None) -> dict:
     return out
 
 
+def rtk_totals(since=None, profile=None) -> dict:
+    """Estimated input tokens rtk compression trimmed, plus how many requests
+    were compressed. token_count in the log is post-compression, so this is
+    would-have-been extra — not a subset of the logged totals.
+    """
+    out = {"saved": 0, "requests": 0}
+    f = _log_file()
+    if not f.exists():
+        return out
+    for line in f.read_text(encoding="utf-8").splitlines():
+        if not line:
+            continue
+        try:
+            data = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not _passes(data, since, profile):
+            continue
+        if data.get("rtk_saved", 0):
+            out["saved"] += data["rtk_saved"]
+            out["requests"] += 1
+    return out
+
+
 def token_breakdown(since=None, profile=None) -> dict:
     """Input-token totals by request content type (system/messages/tools/...),
     plus the file-search subset of tool_results (raw, undiscounted).

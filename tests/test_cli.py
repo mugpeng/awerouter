@@ -33,20 +33,23 @@ def _routing():
 
 
 class TestSavings:
-    def _seed_logs(self, monkeypatch, tmp_path):
+    def _seed_logs(self, monkeypatch, tmp_path, rtk=(0, 0, 0)):
         from awerouter.logging import append
         from awerouter.types import RequestLog
         log_dir = tmp_path / "logs"
         monkeypatch.setenv("AWEROUTER_LOG_DIR", str(log_dir))
         append(RequestLog(ts="2026-01-01T00:00:00+00:00", request_id="r1", model_in="auto",
                           label="default", destination="flash", provider="p", model_out="m",
-                          status=200, ms=1, bytes=1, token_count=100, profile="cc-1"))
+                          status=200, ms=1, bytes=1, token_count=100, profile="cc-1",
+                          rtk_saved=rtk[0]))
         append(RequestLog(ts="2026-01-01T00:01:00+00:00", request_id="r2", model_in="pro",
                           label="think", destination="pro", provider="p", model_out="m",
-                          status=200, ms=1, bytes=1, token_count=30, profile="cc-1"))
+                          status=200, ms=1, bytes=1, token_count=30, profile="cc-1",
+                          rtk_saved=rtk[1]))
         append(RequestLog(ts="2026-01-01T00:12:00+00:00", request_id="r3", model_in="auto",
                           label="default→fallback", destination="pro", provider="p", model_out="m",
-                          status=200, ms=1, bytes=1, token_count=20, profile="cc-1"))
+                          status=200, ms=1, bytes=1, token_count=20, profile="cc-1",
+                          rtk_saved=rtk[2]))
 
     def test_no_logs(self, tmp_path, monkeypatch):
         _setup(tmp_path, monkeypatch)
@@ -76,6 +79,34 @@ class TestSavings:
         assert "plug in your input prices" in r.output
         assert "(100 × pro − 100 × flash) / 1,000,000" in r.output
         assert "(10 × pro − 100 × flash) / 1,000,000" in r.output
+
+    def test_rtk_shown_when_saved(self, tmp_path, monkeypatch):
+        _setup(tmp_path, monkeypatch, _providers(), _routing())
+        self._seed_logs(monkeypatch, tmp_path, rtk=(500, 0, 200))
+        r = CliRunner().invoke(cli, ["usage", "savings"])
+        assert r.exit_code == 0, r.output
+        assert "rtk: saved 700 input tokens (2/3 requests compressed)" in r.output
+        assert "rtk compression (input trimmed before billing, stacks with flash offload):" in r.output
+        assert "saved 700 input tokens across 2 requests" in r.output
+
+    def test_rtk_marker_in_usage_log(self, tmp_path, monkeypatch):
+        _setup(tmp_path, monkeypatch, _providers(), _routing())
+        self._seed_logs(monkeypatch, tmp_path, rtk=(500, 0, 200))
+        r = CliRunner().invoke(cli, ["usage", "log"])
+        assert r.exit_code == 0, r.output
+        assert "rtk=+500" in r.output
+        assert "rtk=+200" in r.output
+        assert r.output.count("rtk=+") == 2  # zero-saving requests stay unmarked
+
+    def test_rtk_hidden_when_nothing_saved(self, tmp_path, monkeypatch):
+        _setup(tmp_path, monkeypatch, _providers(), _routing())
+        self._seed_logs(monkeypatch, tmp_path)
+        for cmd in (["usage", "savings"], ["usage", "log"], ["usage", "stats"]):
+            r = CliRunner().invoke(cli, cmd)
+            assert r.exit_code == 0, r.output
+            assert "rtk:" not in r.output
+            assert "rtk compression" not in r.output
+            assert "rtk=+" not in r.output
 
 
 class TestInit:

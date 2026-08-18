@@ -257,7 +257,7 @@ def _settings_or_default():
 
 def _usage_header(since, profile_name):
     """Print search-discount context for the filtered window."""
-    from awerouter.logging import tail as _tail
+    from awerouter.logging import rtk_totals, tail as _tail
     settings = _settings_or_default()
     discount = settings.search_result_discount if settings else 0.3
     cutoff = _parse_since(since) if since else None
@@ -269,8 +269,12 @@ def _usage_header(since, profile_name):
     eff = effective_tokens(total, fs, discount)
     if fs == 0:
         click.echo(f"search discount: {discount:.0%}  |  total: {total:,}  |  search: 0")
-        return
-    click.echo(f"search discount: {discount:.0%}  |  total: {total:,}  |  search: {fs:,}  |  L3 effective: {eff:,}")
+    else:
+        click.echo(f"search discount: {discount:.0%}  |  total: {total:,}  |  search: {fs:,}  |  L3 effective: {eff:,}")
+    rtk = rtk_totals(cutoff, profile_name)
+    if rtk["saved"]:
+        click.echo(f"rtk: saved {rtk['saved']:,} input tokens "
+                   f"({rtk['requests']}/{len(entries)} requests compressed)")
 
 
 def _usage_log(n, since=None, profile_name=None, tokens_mode=False):
@@ -306,9 +310,10 @@ def _usage_log(n, since=None, profile_name=None, tokens_mode=False):
             continue
         status_s = str(e.status) if e.status is not None else "-"
         dur_s = f"/{_fmt_ms(e.duration_ms)}" if e.duration_ms else ""
+        rtk_s = f"  rtk=+{e.rtk_saved:,}" if e.rtk_saved else ""
         click.echo(
             f"{head}status={status_s:>3}  {_fmt_ms(e.ms)}{dur_s}  "
-            f"tokens={e.token_count}  in={e.model_in}"
+            f"tokens={e.token_count}  in={e.model_in}{rtk_s}"
         )
 
 
@@ -569,7 +574,7 @@ def savings(since, profile_name):
 
 
 def _usage_savings(since, profile_name):
-    from awerouter.logging import cadence, token_totals
+    from awerouter.logging import cadence, rtk_totals, token_totals
     cutoff = _window_cutoff(since, profile_name)
     t = token_totals(cutoff, profile_name)
     if not t:
@@ -589,6 +594,12 @@ def _usage_savings(since, profile_name):
     click.echo(f"  flash   {flash['tokens']:>9,}   avg {flash['tokens'] // max(flash['requests'], 1):,}/req")
     click.echo(f"  pro     {pro['tokens']:>9,}   avg {pro['tokens'] // max(pro['requests'], 1):,}/req")
     click.echo(f"  total   {total_tok:>9,}")
+
+    rtk = rtk_totals(cutoff, profile_name)
+    if rtk["saved"]:
+        click.echo()
+        click.echo("rtk compression (input trimmed before billing, stacks with flash offload):")
+        click.echo(f"  saved {rtk['saved']:,} input tokens across {rtk['requests']} requests")
     click.echo()
     click.echo("vs a pro-only setup:")
     click.echo(f"  pro input billed   {total_tok:,} → {pro['tokens']:,}")

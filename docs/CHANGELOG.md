@@ -4,6 +4,9 @@
 
 RTK compression fixes from real-traffic verification: read dumps were never compressed, and one detection bug actively corrupted Claude Code reads.
 
+### Added
+- RTK savings surfaced in `usage` views (previously `rtk_saved` was logged but never shown): the shared header on `usage log/stats/tokens/savings` prints `rtk: saved N input tokens (x/y requests compressed)` when the window has any; `usage log` appends `rtk=+N` to entries that were compressed (`+` marks trimmed tokens, not included in `tokens=`); `usage savings` adds an rtk block noting it stacks with flash offload. Backed by `logging.rtk_totals(since, profile)`. Nothing prints when nothing was compressed.
+
 ### Fixed
 - `autodetect.py` read-numbered gate counted lines inside the 1024-char detection window (max a few dozen), so the `>= 250` threshold never held and every file-read dump fell through to dedup-log with zero savings. The gate now counts full-text lines.
 - `READ_NUMBERED_LINE_RE` only matched Cursor's `N|content`. It now also matches opencode's `N: content` (`read.ts` emits `${n}: ${line}`; the `: ` variant requires the space so clock times don't match) and Claude Code's `N→content`.
