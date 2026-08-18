@@ -24,6 +24,7 @@ from awerouter.logging import append, auto_threshold, ensure_log_dir
 from awerouter.protocols import ENDPOINT_PATHS, extract
 from awerouter.router import resolve
 from awerouter.types import RequestLog, ResolveResult
+from awerouter.update_check import cached_update_hint
 
 
 # ---------------------------------------------------------------------------
@@ -572,6 +573,10 @@ async def _serve(host: str, port: int, providers: dict, profile, settings,
     display_host = "127.0.0.1" if host in ("0.0.0.0", "::") else host
     print()
     print(_client_hint(profile.protocol, display_host, actual_port, settings))
+    update_hint = cached_update_hint()
+    if update_hint:
+        print()
+        print(update_hint)
     warning = _loopback_proxy_warning()
     if warning:
         print()

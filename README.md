@@ -54,7 +54,7 @@ The agent will install the CLI, init config, help you add profiles, and install 
 > "Tune longContextThreshold from my usage."
 > "Explain my usage savings."
 
-The agent can run read-only commands (`list`, `config show`, `usage stats`, `usage calibrate`, `usage savings`) and edit config directly, but it will **not** run `awerouter serve` (long-lived daemon), `awerouter add` (interactive wizard), `awerouter restore` (overwrites config), or `awerouter usage clean` (deletes logs). To start the daemon, run it in your own terminal:
+The agent can run read-only commands (`list`, `config show`, `usage stats`, `usage calibrate`, `usage savings`) and edit config directly, but it will **not** run `awerouter serve` (long-lived daemon), `awerouter add` (interactive wizard), `awerouter restore` (overwrites config), `awerouter usage clean` (deletes logs), or `awerouter self-update` (upgrades the installation). To start the daemon, run it in your own terminal:
 
 ```bash
 awerouter serve cc-router-1
@@ -225,6 +225,7 @@ awerouter list                        # list profiles (name, protocol, port, fla
 awerouter serve [PROFILE] [--port N] [--host 127.0.0.1]  # port: --port > profile 'port' > 20128
 awerouter <PROFILE>                   # shorthand for serve PROFILE
 awerouter restore [providers|routing] # restore a config file from its .bak backup
+awerouter self-update [--check]        # upgrade to the latest PyPI release (--check: versions only)
 awerouter config path                 # print both config file paths
 awerouter config show [PROFILE]       # redacted config; PROFILE = its providers + entry only
 awerouter config edit [providers|routing]  # open one file in $EDITOR (backs up to .bak first)
@@ -243,6 +244,8 @@ All `usage` subcommands read the same request log. `log`, `stats`, `tokens`, `ca
 `usage tokens` aggregates those per-type breakdowns: input-token totals and share by content type (messages, system prompt, tool definitions, tool results, tool-call arguments, thinking) — useful for seeing how much of a request's tokens are environment constants (system prompt + tool definitions) versus conversation.
 
 `config edit` and the `add` wizard snapshot the target file to `<name>.json.bak` before every write; `awerouter restore [providers|routing]` copies a backup back (with confirmation, then validates the restored config). `config path` prints the two config file paths; `config show [PROFILE]` shows the redacted full config, or just one profile's providers and routing entry.
+
+`self-update` upgrades the installed package — pipx installs use `pipx upgrade awerouter`, everything else `pip install --upgrade`; restart running serve instances afterwards. Every command also checks PyPI in a background thread (at most once a day, cached as `update-check.json` in the config dir) and prints a one-line reminder after the command when a newer release exists — also throttled to once a day; `AWEROUTER_NO_UPDATE_CHECK=1` disables the check entirely. The serve banner shows the same update hint from the cached check.
 
 `usage calibrate` shows the request-token distribution of L3 traffic (the threshold-sensitive layer; all request content — messages, system prompt, tools, tool I/O) and suggests candidate `longContextThreshold` values at p90/p95/p99, plus what `"auto"` would pick under `settings.longContextAuto`. Run it after some real traffic, then either edit `routing.json` or switch the profile to `"auto"` and let serve calibrate on each start.
 

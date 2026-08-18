@@ -5,9 +5,13 @@ Imports the click group from config.py and extends it.
 
 import asyncio
 import shutil
+import subprocess
+import sys
+from pathlib import Path
 
 import click
 
+from awerouter import __version__
 from awerouter.config import (
     DEFAULT_PORT,
     SuggestGroup,
@@ -29,6 +33,7 @@ from awerouter.config import (
 from awerouter.protocols import PROTOCOL_IDS, effective_tokens
 from awerouter.server import _serve
 from awerouter.types import AutoThresholdConfig
+from awerouter.update_check import _version_gte, get_pypi_latest
 
 # Attach config sub-group to the main cli group
 cli = config_cli
@@ -145,6 +150,34 @@ def add():
     validate_profiles(load_providers(), load_routing()[1])
     click.echo(f"Profile '{name}' added: flash={flash}  pro={pro}  L3>{threshold}")
     click.echo(f"Start it with: awerouter {name}")
+
+
+@cli.command("self-update")
+@click.option("--check", "check_only", is_flag=True, help="Show versions without updating.")
+def self_update(check_only):
+    """Update awerouter to the latest PyPI version."""
+    try:
+        latest = get_pypi_latest()
+    except Exception as e:
+        raise SystemExit(f"Failed to check PyPI: {e}")
+    if _version_gte(__version__, latest):
+        click.echo(f"awerouter is up to date ({__version__}).")
+        return
+    click.echo(f"Current: {__version__}  Latest: {latest}")
+    if check_only:
+        return
+
+    if Path(sys.prefix, "pyvenv.cfg").exists() and "pipx" in sys.prefix:
+        cmd = [shutil.which("pipx") or "pipx", "upgrade", "awerouter"]
+    else:
+        cmd = [sys.executable, "-m", "pip", "install", "--upgrade", "awerouter"]
+
+    click.echo(f"Running: {' '.join(cmd)}")
+    result = subprocess.run(cmd)
+    if result.returncode == 0:
+        click.echo("Done. Restart awerouter (including running serve instances) to use the new version.")
+    else:
+        raise SystemExit(result.returncode)
 
 
 @cli.command("list")
@@ -586,7 +619,14 @@ def _usage_savings(since, profile_name):
 
 
 def main(argv=None):
-    return cli.main(args=argv, prog_name="awerouter")
+    from awerouter.update_check import check_async
+    get_reminder = check_async(sys.argv[1:] if argv is None else argv)
+    try:
+        return cli.main(args=argv, prog_name="awerouter")
+    finally:
+        reminder = get_reminder()
+        if reminder:
+            click.echo(f"⚠  {reminder}", err=True)
 
 
 if __name__ == "__main__":

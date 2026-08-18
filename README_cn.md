@@ -54,7 +54,7 @@ Agent 会安装 CLI、初始化配置、帮你添加 profile，并通过 [aweski
 > "根据 usage 帮我调一下 longContextThreshold。"
 > "解释一下我的 usage savings。"
 
-Agent 可以直接运行只读命令（`list`、`config show`、`usage stats`、`usage calibrate`、`usage savings`）并编辑配置，但**不会**运行 `awerouter serve`（常驻 daemon）、`awerouter add`（交互式向导）、`awerouter restore`（覆盖配置文件）或 `awerouter usage clean`（删除日志）。要启动 daemon，请在你自己的终端运行：
+Agent 可以直接运行只读命令（`list`、`config show`、`usage stats`、`usage calibrate`、`usage savings`）并编辑配置，但**不会**运行 `awerouter serve`（常驻 daemon）、`awerouter add`（交互式向导）、`awerouter restore`（覆盖配置文件）、`awerouter usage clean`（删除日志）或 `awerouter self-update`（升级安装）。要启动 daemon，请在你自己的终端运行：
 
 ```bash
 awerouter serve cc-router-1
@@ -225,6 +225,7 @@ awerouter list                        # 列出 profile（名字、协议、端�
 awerouter serve [PROFILE] [--port N] [--host 127.0.0.1]  # 端口优先级：--port > profile 'port' > 20128
 awerouter <PROFILE>                   # serve 的简写
 awerouter restore [providers|routing] # 从 .bak 备份恢复配置文件
+awerouter self-update [--check]        # 升级到最新 PyPI 版本（--check：只看版本不升级）
 awerouter config path                 # 打印两个配置文件路径
 awerouter config show [PROFILE]       # 脱敏全量配置；带 PROFILE 只看它的 provider 和条目
 awerouter config edit [providers|routing]  # 在 $EDITOR 中打开某个文件（先备份 .bak）
@@ -241,6 +242,8 @@ awerouter usage savings
 `usage stats` 按 profile 汇总：label/destination/provider/model 分组（带百分比）、错误与降级计数、各 destination/provider/model 的延迟分位数（首字节与总时长）、估算请求 token（全部请求内容：messages、system prompt、工具定义与工具 I/O）。`--since` 接受 `today`、`yesterday`、`7d` 或 `YYYY-MM-DD`（本地时间）；`--profile` 只看单个 profile。`usage clean` 确认后删除已保存的日志（`requests.jsonl` 及轮转备份）。`usage log` 原样显示条目——默认最后 20 条，加 `--all` 显示全部；`--tokens` 把 status/延迟/入站 model 三列换成每条请求的分类型 token 明细（`msg/sys/tools/results/calls/think`），分类型计数之前记录的条目只显示总数。
 
 `config edit` 和 `add` 向导在每次写入前把目标文件快照为 `<名称>.json.bak`；`awerouter restore [providers|routing]` 确认后把备份拷回并校验恢复后的配置。`config path` 打印两个配置文件路径；`config show [PROFILE]` 显示脱敏全量配置，或单个 profile 用到的 provider 与路由条目。
+
+`self-update` 升级已安装的包——pipx 安装走 `pipx upgrade awerouter`，其余走 `pip install --upgrade`；升级后需重启运行中的 serve。每条命令还会在后台线程检查 PyPI（至多一天一次，缓存在配置目录的 `update-check.json`），发现新版本时在命令结束后输出一行提醒——提醒同样一天至多一次；`AWEROUTER_NO_UPDATE_CHECK=1` 可完全关闭检查。serve 启动横幅也会基于缓存检查结果显示更新提示。
 
 `usage calibrate` 展示 L3 流量（受阈值影响的层）的请求 token 分布（统计全部请求内容：messages、system prompt、工具定义与工具 I/O），并在 p90/p95/p99 处建议 `longContextThreshold` 候选值，末尾给出按 `settings.longContextAuto` 策略 `"auto"` 会选的值。跑一段真实流量后执行，再编辑 `routing.json`，或把 profile 改成 `"auto"` 交给 serve 每次启动时自动校准。
 
