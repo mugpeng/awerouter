@@ -1,4 +1,5 @@
-"""RTK port constants (mirror the Rust defaults rtk uses and 9router carried over).
+"""RTK rewrite constants (Rust defaults from rtk, carried through 9router into
+this from-scratch Python implementation).
 
 Sizes are measured in len(str) code points. The upstream JS port used UTF-16
 units and Rust used bytes; the guards are heuristic thresholds, so the small

@@ -247,7 +247,7 @@ Coding agents resubmit the whole conversation every turn, and most of it is tool
 - **Per-request escape hatch:** send `X-Awerouter-Token-Saver: off` to forward one request uncompressed (e.g. debugging an agent that needs full diff/log detail).
 - Compression runs before routing, and `/v1/messages/count_tokens` is compressed too, so L3 decisions and usage logs match what is actually billed. After enabling RTK, re-run `usage calibrate` — a threshold tuned on uncompressed traffic over-triggers pro (`"auto"` self-corrects after its window).
 
-Compression is a port of [rtk](https://github.com/rtk-ai/rtk) (Apache 2.0) via 9router's JS port (MIT); the request log records the estimated saved tokens per request.
+Compression is inspired by [rtk](https://github.com/rtk-ai/rtk) (Apache 2.0) and 9router's JS port (MIT); this implementation is a from-scratch Python rewrite. The request log records the estimated saved tokens per request.
 
 ## Commands
 

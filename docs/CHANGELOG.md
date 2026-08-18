@@ -1,21 +1,32 @@
 # Changelog
 
+## v0.4.7 - 2026-08-18
+
+RTK matures: smart-truncate keeps a skeleton of the truncated middle so the model can see what was cut and decide whether to re-read, autodetect is hardened against single-line false positives, end-to-end idempotency keeps provider cache prefixes stable across re-sends, and RTK savings are now visible in `usage` views. READMEs carry an experimental warning.
+
+### Added
+- `smart_truncate` and `read_numbered` now keep a "skeleton" of up to 60 signature/import/declaration lines from the truncated middle (ported from rtk Rust `filter.rs` smart_truncate): beyond head 120 + tail 60, structural lines survive adjacent-duplicate-free so later dedup passes are no-ops. The read-numbered marker names the gap start (`re-read with offset=N`) so the model knows how to fetch the middle.
+- RTK savings surfaced in `usage` views (previously `rtk_saved` was logged but never shown): the shared header on `usage log/stats/tokens/savings` prints `rtk: saved N input tokens (x/y requests compressed)` when the window has any; `usage log` appends `rtk=+N` to entries that were compressed (`+` marks trimmed tokens, not included in `tokens=`); `usage savings` adds an rtk block noting it stacks with flash offload. Backed by `logging.rtk_totals(since, profile)`. Nothing prints when nothing was compressed.
+- README and README_cn: experimental warning explaining lossy compression, heuristic detection limits, and the `X-Awerouter-Token-Saver: off` escape hatch.
+- Detection hardened against single-line false positives (inspired by rtk Rust's layered guards — as a network proxy we can't offer its raw-output tee recovery, so detection must be stricter): long-form git-status and build-output now require TWO feature lines in the detect window, closing the class where a file dump with one stray `ERROR:` / `Finished x` / `On branch` line was summarized to near-zero.
+
+### Fixed
+- Compression is now idempotent end to end (tool results are resent every turn; any byte drift between passes would break provider cache prefixes). Fixed three drifts: grep output dropped a trailing blank line on re-detection; git-diff's 500-line cap let compacted diffs re-enter the smart-truncate fallback (cap now 240, below the 250-line gate, and the fallback skips text already carrying our compression markers); tree's truncation marker itself exceeded `TREE_MAX_LINES` so resent trees lost one more line per pass.
+- `_COMPRESSED_MARKERS` guard: text already carrying compression markers is left alone by the smart-truncate fallback.
+- README fail-open note clarified: guards against crashes, not heuristic misjudgment (see the warning above).
+
+### Changed
+- Removed stale TODO doc (`docs/todo/rtk.md`).
+
 ## v0.4.6 - 2026-08-18
 
 RTK compression fixes from real-traffic verification: read dumps were never compressed, and one detection bug actively corrupted Claude Code reads.
-
-### Added
-- Truncation keeps a "skeleton" of the middle (ported from rtk Rust `filter.rs` smart_truncate): beyond head 120 + tail 60, up to 60 signature/import/declaration lines from the truncated middle survive, so the model can see the shape of what was cut and decide whether to re-read. The read-numbered marker now names the gap start (`re-read with offset=121`) so the model knows how to fetch the middle. Skeleton is capped so output stays below the 250-line re-truncation gate, and adjacent-duplicate-free so later dedup passes are byte-level no-ops.
-- Detection hardened against single-line false positives (inspired by rtk Rust's layered guards — as a network proxy we can't offer its raw-output tee recovery, so detection must be stricter): long-form git-status and build-output now require TWO feature lines in the detect window, closing the class where a file dump with one stray `ERROR:` / `Finished x` / `On branch` line was summarized to near-zero.
-- RTK savings surfaced in `usage` views (previously `rtk_saved` was logged but never shown): the shared header on `usage log/stats/tokens/savings` prints `rtk: saved N input tokens (x/y requests compressed)` when the window has any; `usage log` appends `rtk=+N` to entries that were compressed (`+` marks trimmed tokens, not included in `tokens=`); `usage savings` adds an rtk block noting it stacks with flash offload. Backed by `logging.rtk_totals(since, profile)`. Nothing prints when nothing was compressed.
 
 ### Fixed
 - `autodetect.py` read-numbered gate counted lines inside the 1024-char detection window (max a few dozen), so the `>= 250` threshold never held and every file-read dump fell through to dedup-log with zero savings. The gate now counts full-text lines.
 - `READ_NUMBERED_LINE_RE` only matched Cursor's `N|content`. It now also matches opencode's `N: content` (`read.ts` emits `${n}: ${line}`; the `: ` variant requires the space so clock times don't match) and Claude Code's `N→content`.
 - `_RE_PORCELAIN` matched any line with 3+ leading spaces as git-status porcelain, so Claude Code read dumps (right-padded line numbers) were rewritten to a single "clean — nothing to commit" line. Real porcelain never has both XY slots blank (git omits unmodified entries); a lookahead now rejects that case.
 - Long unique-line blobs (codex reads files via shell `cat`/`sed`, no line numbers) hit dedup-log, saved nothing, and smart-truncate was unreachable behind it. `_compress_text` now falls back to smart-truncate when dedup-log yields no shrink and the text is ≥ 250 lines.
-- Compression is now idempotent end to end (tool results are resent every turn; any byte drift between passes would break provider cache prefixes). Fixed three drifts: grep output dropped a trailing blank line on re-detection; git-diff's 500-line cap let compacted diffs re-enter the smart-truncate fallback (cap now 240, below the 250-line gate, and the fallback skips text already carrying our compression markers); tree's truncation marker itself exceeded TREE_MAX_LINES so resent trees lost one more line per pass.
-- Test: `test_compressed_output_survives_recompression` runs every filter's output back through `compress_body` and asserts a byte-identical no-op.
 
 ## v0.4.5 - 2026-08-18
 

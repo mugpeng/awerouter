@@ -2,7 +2,7 @@
 before routing/forwarding, cutting the tokens coding-agent sessions resubmit
 every turn (git diffs, grep hits, listings, build logs).
 
-Python port of 9router's open-sse/rtk/ (MIT), which itself ports the rtk
+Python rewrite based on 9router's open-sse/rtk/ (MIT), which itself derives from the rtk
 Rust filters (https://github.com/rtk-ai/rtk, Apache 2.0 — pipe_cmd.rs and the
 per-command filter sources). Semantics, constants, and detection order follow
 upstream; the traversal is keyed on awerouter's wire protocol instead of

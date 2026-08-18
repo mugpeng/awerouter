@@ -1,4 +1,4 @@
-"""Format auto-detection — port of rtk pipe_cmd.rs auto_detect_filter
+"""Format auto-detection — rewrite of rtk pipe_cmd.rs auto_detect_filter
 (via 9router autodetect.js). Detection order is part of the design: more
 specific formats (git, build tools) win over generic file lists, which win
 over generic truncation.

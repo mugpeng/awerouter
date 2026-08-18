@@ -1,4 +1,4 @@
-"""The 12 RTK compression filters — faithful Python port of 9router's JS port
+"""The 12 RTK compression filters — Python rewrite based on 9router's JS port
 (open-sse/rtk/filters/) of the rtk Rust filters. Every function is a pure
 text -> text transform; upstream file references kept per filter.
 
