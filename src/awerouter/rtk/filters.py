@@ -645,7 +645,10 @@ smart_truncate.filter_name = "smart-truncate"  # type: ignore[attr-defined]
 # read-numbered — "  N|content" dumps (e.g. Cursor read_file): head+tail
 # ---------------------------------------------------------------------------
 
-READ_NUMBERED_LINE_RE = re.compile(r"^\s*\d+\|")
+# line-numbered file dumps. Cursor read_file uses "  N|content"; opencode
+# read.ts emits "N: content"; Claude Code style is "  N→content". The ": "
+# variant requires the space so clock times like "10:30" don't match.
+READ_NUMBERED_LINE_RE = re.compile(r"^\s*\d+(?:\||→|│|: )")
 
 
 def read_numbered(input: str) -> str:

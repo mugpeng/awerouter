@@ -90,8 +90,10 @@ def detect_filter(text: str):
     if SEARCH_LIST_HEADER_RE.match(head):  # header must be the first line
         return search_list
 
-    # line-numbered file dumps ("  N|content") — only when many lines match
-    if len(lines) >= SMART_TRUNCATE_MIN_LINES and _is_line_numbered(lines):
+    # line-numbered file dumps ("  N|content") — only when many lines match.
+    # Line count is over the FULL text: the 1024-char window holds at most a
+    # few dozen lines, so gating on window lines made this branch unreachable.
+    if len(text.split("\n")) >= SMART_TRUNCATE_MIN_LINES and _is_line_numbered(lines):
         return read_numbered
 
     # generic multi-line noise with duplicates

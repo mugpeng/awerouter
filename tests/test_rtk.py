@@ -110,6 +110,27 @@ class TestDetectFilter:
         text = "\n".join(["1|x"] * 260)
         assert detect_filter(text) is read_numbered
 
+    def test_read_numbered_long_lines_outside_window(self):
+        # realistic file dumps exceed the 1024-char window long before 250
+        # lines fit in it — detection must use the full-text line count
+        text = "\n".join(f"{i}|def function_{i}(arg1, arg2): return arg1 + arg2" for i in range(1, 301))
+        assert detect_filter(text) is read_numbered
+        assert len(text) > 1024
+
+    def test_read_numbered_opencode_colon_format(self):
+        # opencode read.ts: `${n}: ${line}`
+        text = "\n".join(f"{i}: import module_{i} # some content" for i in range(1, 301))
+        assert detect_filter(text) is read_numbered
+
+    def test_read_numbered_claude_arrow_format(self):
+        text = "\n".join(f"{i:>4}→import module_{i}" for i in range(1, 301))
+        assert detect_filter(text) is read_numbered
+
+    def test_clock_times_not_read_numbered(self):
+        # "10:30" has no space after the colon and must not match the ":" variant
+        text = "\n".join(f"10:{30+i%10}:0{i%10} event {i} happened" for i in range(300))
+        assert detect_filter(text) is not read_numbered
+
     def test_dedup_log(self):
         assert detect_filter("alpha\nbeta\ngamma\ndelta\nepsilon\n") is dedup_log
 
