@@ -4,8 +4,10 @@
     "thinkModel": "pro",
     "webSearchModel": "pro",
     "toolRouting": {
+      "webSearch": "pro",
       "search": "flash",
-      "edit": "pro"
+      "edit": "pro",
+      "mechanical": "flash"
     },
     "longContextAuto": {
       "percentile": 95,

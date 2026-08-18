@@ -38,16 +38,21 @@ class AutoThresholdConfig:
 
 @dataclass
 class ToolRoutingConfig:
-    """Forced routing by agent phase, keyed on the most recent tool call in
-    the resent history (routing.json settings.toolRouting).
+    """Forced routing keyed on tools (routing.json settings.toolRouting).
 
     Values are destination keys ("flash"/"pro"); null disables that rule.
-    A search-phase turn (Grep/Glob/LS just returned) decides the next cheap
+    "webSearch" fires when the request declares a web_search tool (capability
+    guard, highest precedence); null falls back to the legacy
+    settings.webSearchModel. The phase rules key on the most recent tool call:
+    a search-phase turn (Grep/Glob/LS just returned) decides the next cheap
     mechanical step; an edit-phase turn means code is being written or
-    verified. The layer sits below L3: long-context sessions stay pro.
+    verified; a mechanical turn is todo/subagent bookkeeping. Phase rules sit
+    below L3: long-context sessions stay pro.
     """
+    web_search: Optional[str] = None    # None = legacy settings.webSearchModel
     search: Optional[str] = "flash"
     edit: Optional[str] = "pro"
+    mechanical: Optional[str] = "flash"
 
 
 @dataclass
@@ -55,7 +60,7 @@ class Settings:
     """Global routing settings (shared across all profiles)."""
     background_model: str = "flash"   # L2 tier-label for background → flash dest
     think_model: str = "pro"          # L2 tier-label for think → pro dest
-    web_search_model: str = "pro"     # L1 web_search destination key
+    web_search_model: str = "pro"     # L1 web_search destination key (legacy alias of toolRouting.webSearch)
     search_result_discount: float = 0.3  # L3 weight of file-search (Grep/Glob/LS) result tokens; 1 = off
     long_context_auto: AutoThresholdConfig = field(default_factory=AutoThresholdConfig)
     tool_routing: ToolRoutingConfig = field(default_factory=ToolRoutingConfig)
@@ -84,9 +89,11 @@ class InspectResult:
     # Estimated tokens of tool results from file-search tools (Grep/Glob/LS);
     # L3 weighs these against the threshold at settings.searchResultDiscount.
     file_search_tokens: int = 0
-    # Lowercased name of the most recent tool call in the history ("" if none);
-    # the tool-phase routing layer keys on it.
-    last_tool: str = ""
+    # Trailing parallel batch of tool calls in the history (lowercased names,
+    # empty tuple if none) and its strongest phase ("edit"/"search"/
+    # "mechanical"/""); the tool-phase routing layer keys on them.
+    last_tools: tuple = ()
+    last_phase: str = ""
 
 
 @dataclass

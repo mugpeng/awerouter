@@ -288,6 +288,46 @@ class TestLoadRouting:
         with pytest.raises(SystemExit, match="toolRouting"):
             load_routing()
 
+    def test_settings_websearch_toolrouting_overrides_legacy(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+        _write_config(tmp_path, {}, {
+            "settings": {"webSearchModel": "pro", "toolRouting": {"webSearch": "flash"}},
+            "cc-1": {"protocol": "anthropic", "longContextThreshold": 1,
+                     "destinations": {"flash": "p,m", "pro": "p,m"}},
+        })
+        assert load_routing()[0].tool_routing.web_search == "flash"
+
+    def test_settings_websearch_absent_falls_back_to_legacy(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+        _write_config(tmp_path, {}, {
+            "settings": {"webSearchModel": "flash"},
+            "cc-1": {"protocol": "anthropic", "longContextThreshold": 1,
+                     "destinations": {"flash": "p,m", "pro": "p,m"}},
+        })
+        settings = load_routing()[0]
+        assert settings.web_search_model == "flash"
+        assert settings.tool_routing.web_search is None
+
+    def test_settings_websearch_model_invalid_dies(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+        _write_config(tmp_path, {}, {
+            "settings": {"webSearchModel": "turbo"},
+            "cc-1": {"protocol": "anthropic", "longContextThreshold": 1,
+                     "destinations": {"flash": "p,m", "pro": "p,m"}},
+        })
+        with pytest.raises(SystemExit, match="webSearchModel"):
+            load_routing()
+
+    def test_settings_tool_routing_mechanical(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+        _write_config(tmp_path, {}, {
+            "settings": {"toolRouting": {"mechanical": None}},
+            "cc-1": {"protocol": "anthropic", "longContextThreshold": 1,
+                     "destinations": {"flash": "p,m", "pro": "p,m"}},
+        })
+        tr = load_routing()[0].tool_routing
+        assert (tr.search, tr.edit, tr.mechanical) == ("flash", "pro", None)
+
     @pytest.mark.parametrize("key,bad", [
         ("percentile", 0), ("percentile", 100), ("percentile", "95"), ("percentile", True),
         ("windowDays", 0), ("minSamples", 0), ("fallbackThreshold", -1),

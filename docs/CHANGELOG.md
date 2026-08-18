@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.4.4 - 2026-08-18
+
+L4 matures: parallel batches get deterministic precedence, codex's shell-wrapped calls are classified, todo/task turns join the flash side, and every tool-keyed rule (L1 webSearch included) now lives in one `settings.toolRouting` block.
+
+### Added
+- Trailing-batch semantics: the L4 signal is now the trailing parallel batch of tool calls (`InspectResult.last_tools`) taking its strongest phase (`last_phase`, edit > search > mechanical) — `[Grep, Edit]` and `[Edit, Grep]` route identically.
+- Shell sniffing feeds L4: a trailing `exec_command`/`shell` call is classified by its command text — search binaries count as search, `apply_patch` counts as edit (closes the codex blind spot; shared `_pipeline_heads` parser).
+- New `mechanical` phase: todo/subagent bookkeeping tools (`todo`/`todos`/`todowrite`/`todo_write`/`task`) route to `toolRouting.mechanical` (default flash, label `toolMech`).
+- `settings.toolRouting` absorbs L1: `webSearch` key joins `search`/`edit`/`mechanical` in one block; the legacy top-level `webSearchModel` still works as a fallback (`toolRouting.webSearch` wins). `webSearchModel` values are now validated at load time. Serve banner prints the full mapping on one `tool -> ...` line.
+- Tests: batch precedence both orders, later-batch replacement, responses run semantics, shell-wrapped search/edit classification, mechanical rule, webSearch merge/fallback/validation.
+
 ## v0.4.3 - 2026-08-18
 
 Optional per-profile RTK tool-result compression: profiles with `"rtk": true` rewrite verbose tool output (git diff/status/log, grep hits, listings, build logs) in place before routing, cutting the request tokens coding-agent sessions resubmit every turn. Off by default — routing stays fully transparent unless you opt in.

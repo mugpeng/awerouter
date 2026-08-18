@@ -4,7 +4,7 @@
 
 awerouter 是一个智能大语言模型（LLM）路由器，位于你的编程智能体（coding agent）与上游提供商之间。每个请求首先到达路由器。它依据结构——而非猜测——决定将其发送到廉价的轻量模型（flash model），还是能力更强的旗舰模型（pro model）。这一决策瞬间完成，响应不经修改地直接透传，路由过程对你完全透明。
 
-但路由只是半个问题。另一半是知道路由到底好不好用：你的请求流量中有多少真正流向了轻量模型？`longContextThreshold` 是否过于激进？你是在省钱，还是只是在增加延迟？awerouter 随附一套用量分析工具，可以回答这些问题——还有一套技能体系，让智能体替你回答。
+但解决路由只做了一半。另一半是知道路由到底好不好用：你的请求流量中有多少真正流向了轻量模型？`longContextThreshold` 是否过于激进？你是在省钱，还是只是在增加延迟？awerouter 随附一套用量分析工具，可以回答这些问题——还有一套技能体系，让智能体替你回答。
 
 GitHub：[github.com/mugpeng/awerouter](https://github.com/mugpeng/awerouter)
 
@@ -52,7 +52,7 @@ curl -fsSL https://raw.githubusercontent.com/mugpeng/awerouter/main/resources/sk
 
 ## 用量分析：五条必知命令
 
-awerouter 将所有经过代理的请求写入 `~/.local/state/awerouter/requests.jsonl` 的 JSONL 日志中。五条只读命令让你检查这些日志。每条命令都接受 `--since`（按时间窗口过滤）和 `--profile`（按路由方案过滤）参数。
+awerouter 将所有经过代理的请求写入 `~/.local/state/awerouter/requests.jsonl` 的 JSONL 日志中。五条只读命令让你检查这些日志。每条命令都接受 `--since`（按时间窗口过滤）和 `--profile`（按路由方案过滤）参数。你完全可以调用aweskill 替你装好的awerouter 技能，直接在agent 里去解读这些数值。
 
 ### `usage stats`——路由总览
 
@@ -211,6 +211,14 @@ awerouter usage log --all       # 显示过滤窗口内的所有记录
 > "阅读 https://github.com/mugpeng/awerouter/blob/main/README.ai.md 并按其执行。"
 
 智能体会运行 pip install、安装技能、初始化配置、编辑 `~/.zshrc`，然后向你汇报。`awerouter serve` 则由你自己启动。
+
+
+
+## awerouter 系列文章
+
+- [awerouter：不怕deepseek 涨价，一句话让智能路由给你省钱](https://mp.weixin.qq.com/s/8jucVeQWQRjCIUEXxj-fHQ)
+
+
 
 ## 更多来自 mugpeng
 

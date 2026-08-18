@@ -174,7 +174,12 @@ export ANTHROPIC_BASE_URL=http://127.0.0.1:20128
   "settings": {
     "backgroundModel": "flash",
     "thinkModel": "pro",
-    "webSearchModel": "pro",
+    "toolRouting": {
+      "webSearch": "pro",
+      "search": "flash",
+      "edit": "pro",
+      "mechanical": "flash"
+    },
     "longContextAuto": {
       "percentile": 95,
       "windowDays": 7,
@@ -194,7 +199,7 @@ export ANTHROPIC_BASE_URL=http://127.0.0.1:20128
 }
 ```
 
-`settings` 可省（默认 `flash`/`pro`）。它定义 CC 发送的档位 model id：background（Haiku 档）、think（Opus 档），以及 L1 web_search 流量的目标档位 `webSearchModel`（默认 `pro`）。主循环用 `auto`——由 L3 按难度路由。在 aweswitch profile 里设：`ANTHROPIC_DEFAULT_HAIKU_MODEL=flash`、`ANTHROPIC_MODEL=auto`、`ANTHROPIC_DEFAULT_OPUS_MODEL=pro`。
+`settings` 可省（默认 `flash`/`pro`）。它定义 CC 发送的档位 model id：background（Haiku 档）、think（Opus 档）；所有按工具路由的规则（含 L1 的 `webSearch`）统一放在 `settings.toolRouting`——旧顶层 `webSearchModel` 仍作为兜底兼容。主循环用 `auto`——由 L3 按难度路由。在 aweswitch profile 里设：`ANTHROPIC_DEFAULT_HAIKU_MODEL=flash`、`ANTHROPIC_MODEL=auto`、`ANTHROPIC_DEFAULT_OPUS_MODEL=pro`。
 
 `longContextThreshold` 可以是整数，也可以写 `"auto"`：每次 `serve` 启动时，awerouter 取该 profile 自己最近 `windowDays` 天 L3 有效 token 分布的 `percentile` 分位值作为阈值。窗口内 L3 请求数不足 `minSamples`（新 profile、流量清淡）时改用 `fallbackThreshold`。四个参数都在 `settings.longContextAuto` 里，全部可选——横幅每次都会打印选了什么、依据是什么。注意：分位值决定的是 flash/pro 的*分配比例*，不代表 flash 的能力上限——如果你的 flash 模型在超长上下文上明显退化，请继续用固定阈值。
 
@@ -210,14 +215,16 @@ first-match-wins 管线，逐请求评估：
 
 | 层 | 信号 | 决策 |
 |----|------|------|
-| L1 能力护栏 | body 含 `web_search` 工具 | `settings.webSearchModel`（默认 **pro**） |
+| L1 能力护栏 | body 含 `web_search` 工具 | `toolRouting.webSearch`（默认 **pro**；旧顶层 `webSearchModel` 仍兼容） |
 | L2 档位匹配 | `model == c1/flash` 或 `c1/think` | flash / pro |
 | L3 难度评分 | token（全部请求内容）超阈值，或含图片 | **pro**；否则继续 |
-| L4 工具阶段 | 最近一次工具调用是搜索类（`grep`/`glob`/`ls`/`list`）或编辑类（`edit`/`write`/`apply_patch` 等） | 搜索 → **flash**，编辑 → **pro**（`settings.toolRouting`，`null` 关闭该规则） |
+| L4 工具阶段 | 尾部工具批次为编辑类（`edit`/`write`/`apply_patch` 等）、搜索类（`grep`/`glob`/`ls`/`list`）或机械类（`todo_write`/`task`） | 编辑 → **pro**；搜索 → **flash**；机械 → **flash**（`settings.toolRouting`，`null` 关闭该规则） |
 
 CC 的 `/model` 选择器设置 tier model id（c1/flash / c1/pro / c1/think）。awerouter 直接读取该字段做路由——不猜语义、不用关键词、不跑分类器。
 
-L4 按"agent 刚做了什么"判断：搜索结果之后是廉价的机械动作（再搜、读命中文件），而刚发生编辑意味着正在写代码或验证代码。它排在 L3 之下是刻意的——已超过 `longContextThreshold` 的会话无论刚跑了什么工具都留在 pro，flash 不会拿到可能退化的超长上下文，长上下文这一跨越也保持 flash→pro 单向（阈值以下则会按阶段在 flash↔pro 间交替）。搜索类工具名与 `searchResultDiscount` 检测共用同一集合（claude-code 的 `Grep`/`Glob`/`LS`、opencode 的 `grep`/`glob`/`list`）；编辑类覆盖 `Edit`/`Write`/`NotebookEdit`/`apply_patch`/`replace_in_file` 等，大小写不敏感匹配。
+L4 按"agent 刚做了什么"判断：搜索结果之后是廉价的机械动作（再搜、读命中文件），而刚发生编辑意味着正在写代码或验证代码，todo/子代理属于记账动作。信号取**尾部并行批次**并取其中最强阶段（编辑 > 搜索 > 机械），所以 `[Grep, Edit]` 和 `[Edit, Grep]` 结果一致。shell 包装的调用（codex 的 `exec_command`/`shell`）按命令文本分类——搜索二进制算搜索，`apply_patch` 算编辑。它排在 L3 之下是刻意的——已超过 `longContextThreshold` 的会话无论刚跑了什么工具都留在 pro，flash 不会拿到可能退化的超长上下文，长上下文这一跨越也保持 flash→pro 单向（阈值以下则会按阶段在 flash↔pro 间交替）。搜索类工具名与 `searchResultDiscount` 检测共用同一集合（claude-code 的 `Grep`/`Glob`/`LS`、opencode 的 `grep`/`glob`/`list`）；编辑类覆盖 `Edit`/`Write`/`NotebookEdit`/`apply_patch`/`replace_in_file` 等，大小写不敏感匹配。
+
+所有按工具路由的规则（含 L1 的 `webSearch`）统一放在 `settings.toolRouting`（`webSearch`/`search`/`edit`/`mechanical`），serve 横幅用一行 `tool -> ...` 打印生效的映射。
 
 ## Token Saver（RTK 省流）
 

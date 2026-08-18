@@ -212,17 +212,22 @@ def _parse_auto_threshold(raw) -> AutoThresholdConfig:
 
 
 def _parse_tool_routing(raw) -> ToolRoutingConfig:
-    """settings.toolRouting: {"search": "flash", "edit": "pro"} — destination
-    keys or null to disable a rule. Absent block = both defaults on."""
+    """settings.toolRouting: one block for every tool-keyed routing rule:
+    {"webSearch": "pro", "search": "flash", "edit": "pro", "mechanical": "flash"}.
+
+    Values are destination keys or null; absent block = defaults on
+    (webSearch null falls back to the legacy webSearchModel setting)."""
     if raw is None:
         return ToolRoutingConfig()
     if not isinstance(raw, dict):
         die("routing.json settings 'toolRouting' must be an object")
     cfg = ToolRoutingConfig()
-    for field_name in ("search", "edit"):
-        value = raw.get(field_name, getattr(cfg, field_name))
+    keys = {"webSearch": "web_search", "search": "search",
+            "edit": "edit", "mechanical": "mechanical"}
+    for json_key, field_name in keys.items():
+        value = raw.get(json_key, getattr(cfg, field_name))
         if value is not None and value not in ("flash", "pro"):
-            die(f"routing.json settings toolRouting '{field_name}' must be "
+            die(f"routing.json settings toolRouting '{json_key}' must be "
                 f"'flash', 'pro', or null, got: {value!r}")
         setattr(cfg, field_name, value)
     return cfg
@@ -244,10 +249,14 @@ def load_routing(path: Optional[Path] = None) -> tuple[Settings, dict[str, Routi
         die(f"routing.json settings 'searchResultDiscount' must be a number in [0, 1], got: {raw_discount!r}")
     if not 0 <= discount <= 1:
         die(f"routing.json settings 'searchResultDiscount' must be in [0, 1], got: {discount}")
+    web_search_model = str(raw_settings.get("webSearchModel", "pro"))
+    if web_search_model not in ("flash", "pro"):
+        die(f"routing.json settings 'webSearchModel' must be 'flash' or 'pro' "
+            f"(or move it into toolRouting.webSearch), got: {web_search_model!r}")
     settings = Settings(
         background_model=str(raw_settings.get("backgroundModel", "flash")),
         think_model=str(raw_settings.get("thinkModel", "pro")),
-        web_search_model=str(raw_settings.get("webSearchModel", "pro")),
+        web_search_model=web_search_model,
         search_result_discount=discount,
         long_context_auto=_parse_auto_threshold(raw_settings.get("longContextAuto")),
         tool_routing=_parse_tool_routing(raw_settings.get("toolRouting")),

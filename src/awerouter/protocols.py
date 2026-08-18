@@ -81,6 +81,28 @@ EDIT_TOOLS = frozenset({
     "replace_in_file", "write_to_file", "apply_diff", "create_file",
 })
 
+# State-maintenance / delegation tools: updating a todo list or spawning a
+# subagent is mechanical bookkeeping — the tool-phase layer sends those turns
+# to the cheap destination. claude-code sends TodoWrite/Task, opencode
+# todo_write/task.
+MECHANICAL_TOOLS = frozenset({"todo", "todos", "todowrite", "todo_write", "task"})
+
+
+def _call_phase(name, arguments=None) -> str:
+    """Classify one tool call for the L4 routing layer: "edit" > "search" >
+    "mechanical" > "" — a parallel batch takes the strongest phase present
+    (an edit matters more than the grep next to it)."""
+    if not isinstance(name, str):
+        return ""
+    n = name.lower()
+    if n in EDIT_TOOLS or _shell_is_edit(name, arguments):
+        return "edit"
+    if n in FILE_SEARCH_TOOLS or _shell_is_search(name, arguments):
+        return "search"
+    if n in MECHANICAL_TOOLS:
+        return "mechanical"
+    return ""
+
 
 # Shell-exec tool names whose command text decides search-ness. Codex wraps
 # searches here instead of exposing per-purpose tools (0.147: exec_command,
@@ -88,18 +110,19 @@ EDIT_TOOLS = frozenset({
 # arrive as one compound shell string, e.g. "echo ..; rg -n x . | sed ..".
 _SHELL_TOOLS = frozenset({"exec_command", "shell"})
 _SEARCH_BINARIES = frozenset({"rg", "grep", "find", "fd", "fdfind", "ls", "ag", "ack"})
+_EDIT_BINARIES = frozenset({"apply_patch"})   # codex's shell-wrapped editor
 
 
-def _is_search_command(cmd) -> bool:
-    """True if any segment of a compound shell command is a file search.
+def _pipeline_heads(cmd):
+    """First word of each pipeline in a compound shell command.
 
     Segments split on ;/&&/||/newlines, each reduced to its pipeline head
-    (text before the first |) with leading FOO=bar env assignments stripped;
-    any head whose first word is a search binary qualifies — codex prefixes
-    real work with echo banners, so "first segment" would miss it.
+    (text before the first |) with leading FOO=bar env assignments stripped —
+    codex prefixes real work with echo banners, so every segment must be
+    examined, not just the first.
     """
     if not isinstance(cmd, str) or not cmd.strip():
-        return False
+        return
     for segment in re.split(r";|&&|\|\||\n", cmd):
         head = segment.split("|", 1)[0].strip()
         if not head:
@@ -107,8 +130,12 @@ def _is_search_command(cmd) -> bool:
         words = head.split()
         while words and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", words[0]):
             words.pop(0)
-        if not words:
-            continue
+        if words:
+            yield words
+
+
+def _is_search_command(cmd) -> bool:
+    for words in _pipeline_heads(cmd):
         first = words[0].rsplit("/", 1)[-1]
         if first in _SEARCH_BINARIES:
             return True
@@ -117,21 +144,46 @@ def _is_search_command(cmd) -> bool:
     return False
 
 
+def _is_edit_command(cmd) -> bool:
+    for words in _pipeline_heads(cmd):
+        if words[0].rsplit("/", 1)[-1] in _EDIT_BINARIES:
+            return True
+    return False
+
+
+def _parse_shell_args(arguments):
+    try:
+        args = json.loads(arguments) if isinstance(arguments, str) else arguments
+    except json.JSONDecodeError:
+        return None
+    return args if isinstance(args, dict) else None
+
+
+def _shell_command(arguments):
+    args = _parse_shell_args(arguments)
+    if args is None:
+        return None
+    return args.get("cmd") or args.get("command")
+
+
 def _shell_is_search(name, arguments) -> bool:
     """A shell-tool call counts as file search when its command says so."""
     if not isinstance(name, str) or name.lower() not in _SHELL_TOOLS:
         return False
-    try:
-        args = json.loads(arguments) if isinstance(arguments, str) else arguments
-    except json.JSONDecodeError:
-        return False
-    if not isinstance(args, dict):
-        return False
-    cmd = args.get("cmd") or args.get("command")
+    cmd = _shell_command(arguments)
     if isinstance(cmd, list):
         # argv form: the real command is one element, e.g. ["bash","-lc","rg x"]
         return any(_is_search_command(part) for part in cmd if isinstance(part, str))
     return _is_search_command(cmd)
+
+
+def _shell_is_edit(name, arguments) -> bool:
+    if not isinstance(name, str) or name.lower() not in _SHELL_TOOLS:
+        return False
+    cmd = _shell_command(arguments)
+    if isinstance(cmd, list):
+        return any(_is_edit_command(part) for part in cmd if isinstance(part, str))
+    return _is_edit_command(cmd)
 
 
 def effective_tokens(token_count: int, file_search_tokens: int, discount: float = 0.3) -> int:
@@ -204,9 +256,13 @@ def _extract_anthropic(body: dict) -> InspectResult:
     has_image = False
     tool_names: dict = {}   # tool_use id -> name; a call always precedes its result
     search_texts: list[str] = []
-    last_tool = ""
+    last_tools: tuple = ()   # trailing parallel batch (one assistant message)
+    last_phase = ""
+    _rank = {"": 0, "mechanical": 1, "search": 2, "edit": 3}
     for msg in messages:
         content = msg.get("content")
+        batch: list[str] = []   # tool_use names in THIS message
+        batch_phase = ""
         if isinstance(content, str):
             b["messages"].append(content)
         elif isinstance(content, list):
@@ -228,9 +284,15 @@ def _extract_anthropic(body: dict) -> InspectResult:
                     name = block.get("name")
                     tool_names[block.get("id")] = name
                     if isinstance(name, str):
-                        last_tool = name.lower()
+                        batch.append(name.lower())
+                        phase = _call_phase(name, block.get("input"))
+                        if _rank[phase] > _rank[batch_phase]:
+                            batch_phase = phase
                 elif btype == "thinking":
                     b["thinking"].append(block.get("thinking", ""))
+        if batch:   # a later message with tool_use replaces the trailing batch
+            last_tools = tuple(batch)
+            last_phase = batch_phase
     token_count, breakdown = _summarize(b)
     return InspectResult(
         token_count=token_count,
@@ -239,7 +301,8 @@ def _extract_anthropic(body: dict) -> InspectResult:
         message_count=len(messages),
         token_breakdown=breakdown,
         file_search_tokens=estimate_tokens(" ".join(t for t in search_texts if t)),
-        last_tool=last_tool,
+        last_tools=last_tools,
+        last_phase=last_phase,
     )
 
 
@@ -265,7 +328,9 @@ def _extract_openai_chat(body: dict) -> InspectResult:
     has_image = False
     tool_names: dict = {}   # tool_call id -> function name
     search_texts: list[str] = []
-    last_tool = ""
+    last_tools: tuple = ()   # trailing parallel batch (one assistant message)
+    last_phase = ""
+    _rank = {"": 0, "mechanical": 1, "search": 2, "edit": 3}
     for msg in messages:
         role = msg.get("role")
         if role == "system":
@@ -293,13 +358,21 @@ def _extract_openai_chat(body: dict) -> InspectResult:
                         search_texts.append(text)
                 elif part.get("type") == "image_url":
                     has_image = True
+        batch: list[str] = []   # tool_call names in THIS message
+        batch_phase = ""
         for call in msg.get("tool_calls") or []:
             if isinstance(call, dict) and isinstance(call.get("function"), dict):
                 b["tool_calls"].append(call["function"].get("arguments") or "")
                 name = call["function"].get("name")
                 tool_names[call.get("id")] = name
                 if isinstance(name, str):
-                    last_tool = name.lower()
+                    batch.append(name.lower())
+                    phase = _call_phase(name, call["function"].get("arguments"))
+                    if _rank[phase] > _rank[batch_phase]:
+                        batch_phase = phase
+        if batch:   # a later message with tool_calls replaces the trailing batch
+            last_tools = tuple(batch)
+            last_phase = batch_phase
     token_count, breakdown = _summarize(b)
     return InspectResult(
         token_count=token_count,
@@ -308,7 +381,8 @@ def _extract_openai_chat(body: dict) -> InspectResult:
         message_count=len(messages),
         token_breakdown=breakdown,
         file_search_tokens=estimate_tokens(" ".join(t for t in search_texts if t)),
-        last_tool=last_tool,
+        last_tools=last_tools,
+        last_phase=last_phase,
     )
 
 
@@ -351,13 +425,29 @@ def _extract_openai_responses(body: dict) -> InspectResult:
     message_count = 0
     search_calls: dict = {}   # call_id -> output counts as file search
     search_texts: list[str] = []
-    last_tool = ""
+    last_tools: tuple = ()   # trailing run of consecutive function_call items
+    last_phase = ""
+    _rank = {"": 0, "mechanical": 1, "search": 2, "edit": 3}
+    batch: list[str] = []
+    batch_phase = ""
+
+    def _commit_batch():
+        nonlocal last_tools, last_phase
+        if batch:
+            last_tools = tuple(batch)
+            last_phase = batch_phase
+
     for item in input_value or []:
         if not isinstance(item, dict):
             continue
         content = item.get("content")
         if content is None:
             itype = item.get("type")
+            if itype != "function_call":
+                # outputs/reasoning end the current parallel-call run
+                _commit_batch()
+                batch.clear()
+                batch_phase = ""
             if itype == "function_call":
                 b["tool_calls"].append(item.get("arguments") or "")
                 search_calls[item.get("call_id")] = (
@@ -365,7 +455,10 @@ def _extract_openai_responses(body: dict) -> InspectResult:
                     or _shell_is_search(item.get("name"), item.get("arguments"))
                 )
                 if isinstance(item.get("name"), str):
-                    last_tool = item["name"].lower()
+                    batch.append(item["name"].lower())
+                    phase = _call_phase(item.get("name"), item.get("arguments"))
+                    if _rank[phase] > _rank[batch_phase]:
+                        batch_phase = phase
             elif itype == "function_call_output":
                 text = _block_text(item.get("output"))
                 b["tool_results"].append(text)
@@ -374,6 +467,10 @@ def _extract_openai_responses(body: dict) -> InspectResult:
             elif itype == "reasoning":
                 b["thinking"].append(_block_text(item.get("summary")))
             continue
+        # a message item also ends the current parallel-call run
+        _commit_batch()
+        batch.clear()
+        batch_phase = ""
         message_count += 1
         if isinstance(content, str):
             b["messages"].append(content)
@@ -385,6 +482,7 @@ def _extract_openai_responses(body: dict) -> InspectResult:
                     b["messages"].append(part.get("text", ""))
                 elif part.get("type") == "input_image":
                     has_image = True
+    _commit_batch()   # input may end mid-run
     token_count, breakdown = _summarize(b)
     return InspectResult(
         token_count=token_count,
@@ -393,7 +491,8 @@ def _extract_openai_responses(body: dict) -> InspectResult:
         message_count=message_count,
         token_breakdown=breakdown,
         file_search_tokens=estimate_tokens(" ".join(t for t in search_texts if t)),
-        last_tool=last_tool,
+        last_tools=last_tools,
+        last_phase=last_phase,
     )
 
 

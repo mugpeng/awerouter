@@ -174,7 +174,12 @@ The auth header is **auto-detected from `base_url`**: `anthropic.com` → `x-api
   "settings": {
     "backgroundModel": "flash",
     "thinkModel": "pro",
-    "webSearchModel": "pro",
+    "toolRouting": {
+      "webSearch": "pro",
+      "search": "flash",
+      "edit": "pro",
+      "mechanical": "flash"
+    },
     "longContextAuto": {
       "percentile": 95,
       "windowDays": 7,
@@ -194,7 +199,7 @@ The auth header is **auto-detected from `base_url`**: `anthropic.com` → `x-api
 }
 ```
 
-`settings` is optional (defaults: `flash`/`pro`). It maps the model ids CC sends for the background (Haiku) and think (Opus) tiers, plus the `webSearchModel` destination for L1 web_search traffic (default `pro`). The main loop uses `auto` — routed by difficulty by L3. Set these in your aweswitch profile: `ANTHROPIC_DEFAULT_HAIKU_MODEL=flash`, `ANTHROPIC_MODEL=auto`, `ANTHROPIC_DEFAULT_OPUS_MODEL=pro`.
+`settings` is optional (defaults: `flash`/`pro`). It maps the model ids CC sends for the background (Haiku) and think (Opus) tiers; every tool-keyed routing rule (L1 `webSearch` included) lives in `settings.toolRouting` — the legacy top-level `webSearchModel` still works as a fallback. The main loop uses `auto` — routed by difficulty by L3. Set these in your aweswitch profile: `ANTHROPIC_DEFAULT_HAIKU_MODEL=flash`, `ANTHROPIC_MODEL=auto`, `ANTHROPIC_DEFAULT_OPUS_MODEL=pro`.
 
 `longContextThreshold` is an integer, or `"auto"` to calibrate it from this profile's own traffic: at every `serve` start, awerouter takes the `percentile` of the profile's L3 effective-token distribution over the trailing `windowDays` as the threshold. With fewer than `minSamples` L3 requests in the window (fresh profile, quiet week) the `fallbackThreshold` applies instead. All four knobs live in `settings.longContextAuto` and are optional — the banner always prints what was picked and why. Note the percentile sets the flash/pro *split*, not flash's capability ceiling: if your flash model degrades on very long contexts, keep a manual threshold.
 
@@ -210,14 +215,16 @@ First-match-wins pipeline, evaluated per request:
 
 | Layer | Signal | Decision |
 |-------|--------|----------|
-| L1 Capability | `web_search` tool in body | `settings.webSearchModel` (default **pro**) |
+| L1 Capability | `web_search` tool in body | `toolRouting.webSearch` (default **pro**; legacy `webSearchModel` still works) |
 | L2 Tier label | `model == c1/flash` or `c1/think` | flash / pro respectively |
 | L3 Difficulty | token count (all request content) > threshold, or has image | **pro**; else fall through |
-| L4 Tool phase | most recent tool call is search-class (`grep`/`glob`/`ls`/`list`) or edit-class (`edit`/`write`/`apply_patch`/...) | search → **flash**, edit → **pro** (`settings.toolRouting`, `null` disables a rule) |
+| L4 Tool phase | trailing tool batch is edit-class (`edit`/`write`/`apply_patch`/...), search-class (`grep`/`glob`/`ls`/`list`), or mechanical (`todo_write`/`task`) | edit → **pro**; search → **flash**; mechanical → **flash** (`settings.toolRouting`, `null` disables a rule) |
 
 CC's `/model` picker sets the tier model id (c1/flash / c1/pro / c1/think). awerouter reads it and routes accordingly — no keyword parsing, no LLM classifier.
 
-L4 keys on what the agent just did: search results feed cheap mechanical next steps (list the next glob, read a hit), while a fresh edit means code is being written or verified. It sits below L3 on purpose — a session already above `longContextThreshold` stays pro no matter which tool just ran, so flash never sees contexts it may degrade on and the long-context crossing stays one-way flash→pro (below the threshold, sessions may alternate flash↔pro by phase). Search-class tool names reuse the same set as the `searchResultDiscount` detection (claude-code's `Grep`/`Glob`/`LS`, opencode's `grep`/`glob`/`list`); edit-class covers `Edit`/`Write`/`NotebookEdit`/`apply_patch`/`replace_in_file` and friends, matched case-insensitively.
+L4 keys on what the agent just did: search results feed cheap mechanical next steps (list the next glob, read a hit), while a fresh edit means code is being written or verified; todo/subagent turns are bookkeeping. The signal is the **trailing parallel batch** of tool calls and takes its strongest phase (edit > search > mechanical), so `[Grep, Edit]` and `[Edit, Grep]` route identically. Shell-wrapped calls (codex `exec_command`/`shell`) are classified by their command text — search binaries count as search, `apply_patch` counts as edit. L4 sits below L3 on purpose — a session already above `longContextThreshold` stays pro no matter which tool just ran, so flash never sees contexts it may degrade on and the long-context crossing stays one-way flash→pro (below the threshold, sessions may alternate flash↔pro by phase). Search-class tool names reuse the same set as the `searchResultDiscount` detection (claude-code's `Grep`/`Glob`/`LS`, opencode's `grep`/`glob`/`list`); edit-class covers `Edit`/`Write`/`NotebookEdit`/`apply_patch`/`replace_in_file` and friends, matched case-insensitively.
+
+All tool-keyed rules live in one block — `settings.toolRouting` (`webSearch`/`search`/`edit`/`mechanical`) — and the serve banner prints the active mapping on one `tool -> ...` line.
 
 ## Token Saver (RTK)
 

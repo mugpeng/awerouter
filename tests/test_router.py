@@ -17,11 +17,11 @@ def _cfg():
 
 
 def _resolve(model, body, threshold=32000, web_search_model="pro", search_discount=0.3,
-             tool_search_dest="flash", tool_edit_dest="pro"):
+             tool_search_dest="flash", tool_edit_dest="pro", tool_mech_dest="flash"):
     return resolve(
         model, extract("anthropic", body), _cfg(), "flash", "think",
         threshold, web_search_model, search_discount,
-        tool_search_dest, tool_edit_dest,
+        tool_search_dest, tool_edit_dest, tool_mech_dest,
     )
 
 
@@ -685,35 +685,95 @@ class TestResolveToolPhase:
         assert r.destination == "pro"
         assert r.label == "toolSearch"
 
+    def test_mechanical_phase_goes_flash(self):
+        r = _resolve("auto", self._body("TodoWrite"))
+        assert r.destination == "flash"
+        assert r.label == "toolMech"
 
-class TestLastToolExtraction:
-    def test_anthropic_last_tool_use_wins(self):
+    def test_mechanical_null_disables(self):
+        r = _resolve("auto", self._body("Task"), tool_mech_dest=None)
+        assert r.label == "default"
+
+
+class TestTrailingBatch:
+    def test_anthropic_batch_edit_beats_search_regardless_of_order(self):
+        """A parallel batch takes its strongest phase: edit > search > mechanical."""
+        for names in (("Grep", "Edit"), ("Edit", "Grep")):
+            r = extract("anthropic", {"messages": [
+                {"role": "assistant", "content": [
+                    {"type": "tool_use", "id": "t1", "name": names[0], "input": {}},
+                    {"type": "tool_use", "id": "t2", "name": names[1], "input": {}},
+                ]},
+            ]})
+            assert r.last_tools == tuple(n.lower() for n in names)
+            assert r.last_phase == "edit"
+
+    def test_anthropic_batch_search_beats_mechanical(self):
         r = extract("anthropic", {"messages": [
             {"role": "assistant", "content": [
-                {"type": "tool_use", "id": "t1", "name": "Grep", "input": {}},
-                {"type": "tool_use", "id": "t2", "name": "Edit", "input": {}},
+                {"type": "tool_use", "id": "t1", "name": "TodoWrite", "input": {}},
+                {"type": "tool_use", "id": "t2", "name": "Grep", "input": {}},
             ]},
         ]})
-        assert r.last_tool == "edit"   # last call in a parallel batch decides
+        assert r.last_phase == "search"
+
+    def test_anthropic_later_batch_replaces_earlier(self):
+        r = extract("anthropic", {"messages": [
+            {"role": "assistant", "content": [
+                {"type": "tool_use", "id": "t1", "name": "Edit", "input": {}},
+            ]},
+            {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": "t1", "content": "ok"},
+            ]},
+            {"role": "assistant", "content": [
+                {"type": "tool_use", "id": "t2", "name": "Grep", "input": {}},
+            ]},
+        ]})
+        assert r.last_tools == ("grep",)
+        assert r.last_phase == "search"
 
     def test_anthropic_none(self):
         r = extract("anthropic", {"messages": [{"content": "hi"}]})
-        assert r.last_tool == ""
+        assert r.last_tools == ()
+        assert r.last_phase == ""
 
-    def test_openai_chat_last_tool_call(self):
+    def test_openai_chat_batch(self):
         r = extract("openai-chat", {"messages": [
             {"role": "assistant", "tool_calls": [
                 {"id": "c1", "function": {"name": "grep", "arguments": "{}"}},
                 {"id": "c2", "function": {"name": "write", "arguments": "{}"}},
             ]},
         ]})
-        assert r.last_tool == "write"
+        assert r.last_tools == ("grep", "write")
+        assert r.last_phase == "edit"
 
-    def test_openai_responses_last_function_call(self):
+    def test_openai_responses_run_and_outputs(self):
         r = extract("openai-responses", {"input": [
             {"type": "function_call", "call_id": "c1", "name": "Glob", "arguments": "{}"},
+            {"type": "function_call", "call_id": "c2", "name": "Task", "arguments": "{}"},
+            {"type": "function_call_output", "call_id": "c1", "output": "files"},
+            {"type": "function_call_output", "call_id": "c2", "output": "spawned"},
         ]})
-        assert r.last_tool == "glob"
+        assert r.last_tools == ("glob", "task")
+        assert r.last_phase == "search"   # search beats mechanical within the run
+
+    def test_responses_shell_wrapped_search_and_edit(self):
+        """codex wraps tools in exec_command; the command text decides phase."""
+        search = extract("openai-responses", {"input": [
+            {"type": "function_call", "call_id": "c1", "name": "exec_command",
+             "arguments": json.dumps({"cmd": "echo hi; rg -n needle ."})},
+        ]})
+        assert search.last_phase == "search"
+        edit = extract("openai-responses", {"input": [
+            {"type": "function_call", "call_id": "c1", "name": "exec_command",
+             "arguments": json.dumps({"cmd": "cd src && apply_patch <<'EOF'"})},
+        ]})
+        assert edit.last_phase == "edit"
+        neither = extract("openai-responses", {"input": [
+            {"type": "function_call", "call_id": "c1", "name": "exec_command",
+             "arguments": json.dumps({"cmd": "cargo build --release"})},
+        ]})
+        assert neither.last_phase == ""
 
 
 class TestResolveAcrossProtocols:

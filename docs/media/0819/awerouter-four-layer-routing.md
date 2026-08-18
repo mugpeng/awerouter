@@ -2,13 +2,11 @@
 
 ![awerouter](../../../logo/logo.png)
 
-Every routing tool has to answer one question a thousand times a day: *this request — cheap model or strong model?*
+Every routing tool answers the same question a thousand times a day: *this request — cheap model or strong model?*
 
-Most tools answer it by trying to understand the request. They run an LLM classifier over it, or match keywords against a list, or replay conversation history into a scoring function. All of these share a hidden cost: they spend tokens, add latency, and — worse — they guess. A classifier can be wrong in both directions, and a wrong routing decision is either wasted money or degraded quality, invisible to you either way.
+Most tools answer it by trying to understand the request: an LLM classifier, a keyword list, a scoring function over the conversation. All of these spend tokens, add latency, and — worse — guess. A wrong routing decision is either wasted money or degraded quality, invisible to you either way.
 
 awerouter makes the opposite bet: **route from structure, not semantics.** The shape of a request — what tools it declares, what model id it carries, how many tokens it holds, what the agent just did — is enough signal to route well, and it costs nothing to read.
-
-That bet shapes everything. Here is the philosophy behind the four layers.
 
 GitHub: [github.com/mugpeng/awerouter](https://github.com/mugpeng/awerouter)
 
