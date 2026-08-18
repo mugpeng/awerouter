@@ -36,7 +36,11 @@ _RE_GIT_DIFF_HUNK = re.compile(r"^@@ ", re.MULTILINE)
 _RE_GIT_STATUS = re.compile(
     r"^On branch |^nothing to commit|^Changes (not |to be )|^Untracked files:", re.MULTILINE
 )
-_RE_PORCELAIN = re.compile(r"^[ MADRCU?!][ MADRCU?!] \S", re.MULTILINE)
+# Real porcelain never has both XY slots blank (git omits unmodified entries),
+# so the lookahead rejects plain indented text — Claude Code read dumps pad line
+# numbers with spaces and would otherwise be eaten as git-status (" M "-style
+# prefix matches any line with 3+ leading spaces).
+_RE_PORCELAIN = re.compile(r"^(?!  )[ MADRCU?!][ MADRCU?!] \S", re.MULTILINE)
 _RE_BUILD_OUTPUT = re.compile(
     r"^(npm (warn|error|ERR!)|yarn (warn|error)|\s*Compiling\s+\S+|\s*Downloading\s+\S+"
     r"|added \d+ package|\[ERROR\]|BUILD (SUCCESS|FAILED)|\s*Finished\s+"

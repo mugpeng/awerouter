@@ -22,7 +22,8 @@ from dataclasses import dataclass, field
 from awerouter.protocols import estimate_tokens
 from awerouter.rtk.apply import safe_apply
 from awerouter.rtk.autodetect import detect_filter
-from awerouter.rtk.constants import MIN_COMPRESS_SIZE, RAW_CAP
+from awerouter.rtk.constants import MIN_COMPRESS_SIZE, RAW_CAP, SMART_TRUNCATE_MIN_LINES
+from awerouter.rtk.filters import dedup_log, smart_truncate
 
 
 @dataclass
@@ -152,6 +153,16 @@ def _compress_text(text: str, stats: RtkStats, shape: str) -> str:
         return text
 
     out = safe_apply(fn, text)
+
+    # dedup-log is the generic catch-all, so a unique-line blob (file dumps
+    # read via shell — codex's cat/sed reads) reaches it and saves nothing;
+    # smart-truncate was upstream's intended last resort for exactly that.
+    if fn is dedup_log and len(out) >= size_in \
+            and len(text.split("\n")) >= SMART_TRUNCATE_MIN_LINES:
+        truncated = safe_apply(smart_truncate, text)
+        if truncated and len(truncated) < size_in:
+            out = truncated
+            fn = smart_truncate
 
     # never return empty, never grow the input
     if not out or len(out) >= size_in:

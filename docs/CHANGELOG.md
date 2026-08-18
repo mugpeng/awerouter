@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.4.6 - 2026-08-18
+
+RTK compression fixes from real-traffic verification: read dumps were never compressed, and one detection bug actively corrupted Claude Code reads.
+
+### Fixed
+- `autodetect.py` read-numbered gate counted lines inside the 1024-char detection window (max a few dozen), so the `>= 250` threshold never held and every file-read dump fell through to dedup-log with zero savings. The gate now counts full-text lines.
+- `READ_NUMBERED_LINE_RE` only matched Cursor's `N|content`. It now also matches opencode's `N: content` (`read.ts` emits `${n}: ${line}`; the `: ` variant requires the space so clock times don't match) and Claude Code's `N→content`.
+- `_RE_PORCELAIN` matched any line with 3+ leading spaces as git-status porcelain, so Claude Code read dumps (right-padded line numbers) were rewritten to a single "clean — nothing to commit" line. Real porcelain never has both XY slots blank (git omits unmodified entries); a lookahead now rejects that case.
+- Long unique-line blobs (codex reads files via shell `cat`/`sed`, no line numbers) hit dedup-log, saved nothing, and smart-truncate was unreachable behind it. `_compress_text` now falls back to smart-truncate when dedup-log yields no shrink and the text is ≥ 250 lines.
+
 ## v0.4.5 - 2026-08-18
 
 L4 matures: parallel batches get deterministic precedence, codex's shell-wrapped calls are classified, todo/task turns join the flash side, and every tool-keyed rule (L1 webSearch included) now lives in one `settings.toolRouting` block.

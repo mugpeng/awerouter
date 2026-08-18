@@ -131,6 +131,18 @@ class TestDetectFilter:
         text = "\n".join(f"10:{30+i%10}:0{i%10} event {i} happened" for i in range(300))
         assert detect_filter(text) is not read_numbered
 
+    def test_indented_text_not_porcelain(self):
+        # Claude Code read dumps pad line numbers with spaces; 3+ leading
+        # spaces must not read as git-status porcelain
+        text = "\n".join(f"{i:>6}→def fn_{i}(x): return x" for i in range(1, 400))
+        assert detect_filter(text) is read_numbered
+
+    def test_real_porcelain_still_detected(self):
+        # both-slots-blank XY never occurs in real porcelain, so rejecting it
+        # keeps every actual status line detectable
+        text = "\n".join([" M src/a.py", "M  src/b.py", "?? new.txt", "D  gone.py"])
+        assert detect_filter(text) is git_status
+
     def test_dedup_log(self):
         assert detect_filter("alpha\nbeta\ngamma\ndelta\nepsilon\n") is dedup_log
 
@@ -366,6 +378,22 @@ class TestCompressBody:
         stats = rtk.compress_body(body, "anthropic")
         assert stats.hits == []
         assert body["messages"][0]["content"][0]["content"] == payload
+
+    def test_unique_line_blob_falls_back_to_smart_truncate(self):
+        # codex reads files via shell (cat/sed): plain un-numbered dumps land
+        # in dedup-log, save nothing, and must fall back to smart-truncate
+        payload = "\n".join(f"def fn_{i}(x): return x * 2" for i in range(400))
+        body = {"input": [{"type": "function_call_output", "call_id": "c1", "output": payload}]}
+        stats = rtk.compress_body(body, "openai-responses")
+        assert stats.hits[0].filter == "smart-truncate"
+        assert "lines truncated" in body["input"][0]["output"]
+
+    def test_dedup_savings_keep_dedup(self):
+        # when dedup-log actually shrinks the text there is no fallback
+        payload = "\n".join(["progress: " + "tick " * 10] * 60 + ["unique tail line"])
+        body = {"input": [{"type": "function_call_output", "call_id": "c1", "output": payload}]}
+        stats = rtk.compress_body(body, "openai-responses")
+        assert stats.hits[0].filter == "dedup-log"
 
     def test_uncompressible_body_returns_empty_stats(self):
         body = {"messages": [{"role": "user", "content": "hi"}]}
