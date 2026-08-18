@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.4.4 - 2026-08-18
+## v0.4.5 - 2026-08-18
 
 L4 matures: parallel batches get deterministic precedence, codex's shell-wrapped calls are classified, todo/task turns join the flash side, and every tool-keyed rule (L1 webSearch included) now lives in one `settings.toolRouting` block.
 
