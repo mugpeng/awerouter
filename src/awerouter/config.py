@@ -14,7 +14,7 @@ from urllib.parse import urlparse
 
 from awerouter import __version__
 from awerouter.protocols import PROTOCOL_IDS
-from awerouter.types import AutoThresholdConfig, Destination, Provider, RoutingProfile, Settings
+from awerouter.types import AutoThresholdConfig, Destination, Provider, RoutingProfile, Settings, ToolRoutingConfig
 
 # ---------------------------------------------------------------------------
 # Constants (mirror aweswitch cli.py conventions exactly)
@@ -211,6 +211,23 @@ def _parse_auto_threshold(raw) -> AutoThresholdConfig:
     return cfg
 
 
+def _parse_tool_routing(raw) -> ToolRoutingConfig:
+    """settings.toolRouting: {"search": "flash", "edit": "pro"} — destination
+    keys or null to disable a rule. Absent block = both defaults on."""
+    if raw is None:
+        return ToolRoutingConfig()
+    if not isinstance(raw, dict):
+        die("routing.json settings 'toolRouting' must be an object")
+    cfg = ToolRoutingConfig()
+    for field_name in ("search", "edit"):
+        value = raw.get(field_name, getattr(cfg, field_name))
+        if value is not None and value not in ("flash", "pro"):
+            die(f"routing.json settings toolRouting '{field_name}' must be "
+                f"'flash', 'pro', or null, got: {value!r}")
+        setattr(cfg, field_name, value)
+    return cfg
+
+
 def load_routing(path: Optional[Path] = None) -> tuple[Settings, dict[str, RoutingProfile]]:
     """Load global settings + all routing profiles keyed by profile id."""
     path = path or routing_path()
@@ -233,6 +250,7 @@ def load_routing(path: Optional[Path] = None) -> tuple[Settings, dict[str, Routi
         web_search_model=str(raw_settings.get("webSearchModel", "pro")),
         search_result_discount=discount,
         long_context_auto=_parse_auto_threshold(raw_settings.get("longContextAuto")),
+        tool_routing=_parse_tool_routing(raw_settings.get("toolRouting")),
     )
 
     profiles: dict[str, RoutingProfile] = {}

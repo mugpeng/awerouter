@@ -259,6 +259,35 @@ class TestLoadRouting:
         assert cfg.percentile == 99
         assert cfg.fallback_threshold == 8000
 
+    def test_settings_tool_routing_defaults(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+        _write_config(tmp_path, {}, {
+            "cc-1": {"protocol": "anthropic", "longContextThreshold": 1,
+                     "destinations": {"flash": "p,m", "pro": "p,m"}},
+        })
+        tr = load_routing()[0].tool_routing
+        assert (tr.search, tr.edit) == ("flash", "pro")
+
+    def test_settings_tool_routing_null_disables(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+        _write_config(tmp_path, {}, {
+            "settings": {"toolRouting": {"search": None, "edit": "pro"}},
+            "cc-1": {"protocol": "anthropic", "longContextThreshold": 1,
+                     "destinations": {"flash": "p,m", "pro": "p,m"}},
+        })
+        tr = load_routing()[0].tool_routing
+        assert (tr.search, tr.edit) == (None, "pro")
+
+    def test_settings_tool_routing_invalid_dies(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+        _write_config(tmp_path, {}, {
+            "settings": {"toolRouting": {"search": "turbo"}},
+            "cc-1": {"protocol": "anthropic", "longContextThreshold": 1,
+                     "destinations": {"flash": "p,m", "pro": "p,m"}},
+        })
+        with pytest.raises(SystemExit, match="toolRouting"):
+            load_routing()
+
     @pytest.mark.parametrize("key,bad", [
         ("percentile", 0), ("percentile", 100), ("percentile", "95"), ("percentile", True),
         ("windowDays", 0), ("minSamples", 0), ("fallbackThreshold", -1),

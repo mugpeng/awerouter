@@ -16,10 +16,12 @@ def _cfg():
     }
 
 
-def _resolve(model, body, threshold=32000, web_search_model="pro", search_discount=0.3):
+def _resolve(model, body, threshold=32000, web_search_model="pro", search_discount=0.3,
+             tool_search_dest="flash", tool_edit_dest="pro"):
     return resolve(
         model, extract("anthropic", body), _cfg(), "flash", "think",
         threshold, web_search_model, search_discount,
+        tool_search_dest, tool_edit_dest,
     )
 
 
@@ -529,7 +531,7 @@ class TestResolve:
                 {"type": "tool_result", "tool_use_id": "t1", "content": "x" * 500},
             ]},
         ]}
-        r = _resolve("auto", body, threshold=100)  # raw 126 tokens, effective ~39
+        r = _resolve("auto", body, threshold=100, tool_search_dest=None)  # raw 126 tokens, effective ~39
         assert r.destination == "flash"
         assert r.label == "default"
 
@@ -617,6 +619,101 @@ class TestResolve:
         body = {"messages": [{"content": "hi"}]}
         r = _resolve("think", body)
         assert r.label == "think"
+
+
+class TestResolveToolPhase:
+    """L4: the most recent tool call forces the destination (below L3)."""
+
+    @staticmethod
+    def _body(tool_name, result="x"):
+        return {"messages": [
+            {"role": "assistant", "content": [
+                {"type": "tool_use", "id": "t1", "name": tool_name, "input": {}},
+            ]},
+            {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": "t1", "content": result},
+            ]},
+        ]}
+
+    def test_search_phase_goes_flash(self):
+        r = _resolve("auto", self._body("Grep"))
+        assert r.destination == "flash"
+        assert r.label == "toolSearch"
+
+    def test_edit_phase_goes_pro(self):
+        r = _resolve("auto", self._body("Edit"))
+        assert r.destination == "pro"
+        assert r.label == "toolEdit"
+
+    def test_long_context_beats_search_flash(self):
+        """Above the threshold the session stays pro even on grep turns:
+        flash's capability ceiling and the one-way session invariant win.
+        Bulk comes from a Read result; Glob is the most recent call."""
+        body = {"messages": [
+            {"role": "assistant", "content": [
+                {"type": "tool_use", "id": "t1", "name": "Read", "input": {}},
+                {"type": "tool_use", "id": "t2", "name": "Glob", "input": {}},
+            ]},
+            {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": "t1", "content": "x" * 500},
+                {"type": "tool_result", "tool_use_id": "t2", "content": "y"},
+            ]},
+        ]}
+        r = _resolve("auto", body, threshold=100)
+        assert r.destination == "pro"
+        assert r.label == "longContext"
+
+    def test_web_search_beats_edit_pro(self):
+        body = self._body("Write")
+        body["tools"] = [{"name": "web_search_20250813"}]
+        r = _resolve("auto", body)
+        assert r.label == "webSearch"
+
+    def test_nonclassified_tool_falls_through(self):
+        r = _resolve("auto", self._body("Read"))
+        assert r.destination == "flash"
+        assert r.label == "default"
+
+    def test_null_disables_rule(self):
+        r = _resolve("auto", self._body("Grep"), tool_search_dest=None)
+        assert r.label == "default"
+        r = _resolve("auto", self._body("Edit"), tool_edit_dest=None)
+        assert r.label == "default"
+
+    def test_search_dest_can_be_pro(self):
+        r = _resolve("auto", self._body("Grep"), tool_search_dest="pro")
+        assert r.destination == "pro"
+        assert r.label == "toolSearch"
+
+
+class TestLastToolExtraction:
+    def test_anthropic_last_tool_use_wins(self):
+        r = extract("anthropic", {"messages": [
+            {"role": "assistant", "content": [
+                {"type": "tool_use", "id": "t1", "name": "Grep", "input": {}},
+                {"type": "tool_use", "id": "t2", "name": "Edit", "input": {}},
+            ]},
+        ]})
+        assert r.last_tool == "edit"   # last call in a parallel batch decides
+
+    def test_anthropic_none(self):
+        r = extract("anthropic", {"messages": [{"content": "hi"}]})
+        assert r.last_tool == ""
+
+    def test_openai_chat_last_tool_call(self):
+        r = extract("openai-chat", {"messages": [
+            {"role": "assistant", "tool_calls": [
+                {"id": "c1", "function": {"name": "grep", "arguments": "{}"}},
+                {"id": "c2", "function": {"name": "write", "arguments": "{}"}},
+            ]},
+        ]})
+        assert r.last_tool == "write"
+
+    def test_openai_responses_last_function_call(self):
+        r = extract("openai-responses", {"input": [
+            {"type": "function_call", "call_id": "c1", "name": "Glob", "arguments": "{}"},
+        ]})
+        assert r.last_tool == "glob"
 
 
 class TestResolveAcrossProtocols:

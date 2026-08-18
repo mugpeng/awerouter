@@ -206,15 +206,18 @@ Keys reference `${ENV_VAR}` syntax. Missing env vars die with a clear message at
 
 ## How It Routes
 
-Three-layer first-match-wins pipeline, evaluated per request:
+First-match-wins pipeline, evaluated per request:
 
 | Layer | Signal | Decision |
 |-------|--------|----------|
 | L1 Capability | `web_search` tool in body | `settings.webSearchModel` (default **pro**) |
 | L2 Tier label | `model == c1/flash` or `c1/think` | flash / pro respectively |
-| L3 Difficulty | token count (all request content) > threshold, or has image | **pro**; else **flash** |
+| L3 Difficulty | token count (all request content) > threshold, or has image | **pro**; else fall through |
+| L4 Tool phase | most recent tool call is search-class (`grep`/`glob`/`ls`/`list`) or edit-class (`edit`/`write`/`apply_patch`/...) | search → **flash**, edit → **pro** (`settings.toolRouting`, `null` disables a rule) |
 
 CC's `/model` picker sets the tier model id (c1/flash / c1/pro / c1/think). awerouter reads it and routes accordingly — no keyword parsing, no LLM classifier.
+
+L4 keys on what the agent just did: search results feed cheap mechanical next steps (list the next glob, read a hit), while a fresh edit means code is being written or verified. It sits below L3 on purpose — a session already above `longContextThreshold` stays pro no matter which tool just ran, so flash never sees contexts it may degrade on and the one-way flash→pro session invariant holds. Search-class tool names reuse the same set as the `searchResultDiscount` detection (claude-code's `Grep`/`Glob`/`LS`, opencode's `grep`/`glob`/`list`); edit-class covers `Edit`/`Write`/`NotebookEdit`/`apply_patch`/`replace_in_file` and friends, matched case-insensitively.
 
 ## Commands
 

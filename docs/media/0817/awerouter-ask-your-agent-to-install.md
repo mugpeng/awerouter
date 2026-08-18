@@ -10,11 +10,11 @@ awerouter was born out of this exact frustration. And it makes a second bet on t
 
 Then I let my agent set the whole thing up.
 
-I told it: *"Read https://github.com/mugpeng/awerouter/blob/main/README.ai.md and follow it."* Then I went to get a coffee.
+I told it: "Read https://github.com/mugpeng/awerouter/blob/main/README.ai.md and follow it." Then I went to get a coffee.
 
 When I came back, awerouter was installed, the skill was registered, two config files sat in `~/.config/awerouter/`, and the env vars were in `~/.zshrc`. It had read the template configs, set up three providers — StepFun for cheap flash work, Anthropic for pro, and an OpenAI-compatible one for Opencode sessions — and wired them into a routing profile.
 
-Then it said: *"Run `awerouter serve` in your terminal. I will not start the daemon for you."*
+Then it said: "Run `awerouter serve` in your terminal. I will not start the daemon for you."
 
 That is the new shape of installing an agent tool. The install is a task. The agent does tasks. So I gave the task to the agent.
 
@@ -194,3 +194,4 @@ awerouter is part of the aweteam ecosystem:
 - **[aweskill](https://aweskill.webioinfo.top/)** — CLI-first skill package manager for 47+ AI coding agents
 - **[aweswitch](https://github.com/Webioinfo01/aweswitch)** — Agent profile switcher for Claude Code, Codex, and OpenCode; launches sessions pointing at the awerouter daemon
 - **[aweshelf](https://github.com/Webioinfo01/aweshelf)** — AI coding session manager with profile-aware restoration
+- **[awerouter](https://github.com/mugpeng/awerouter)** — A smart LLM router that automatically directs agent requests to fast, low-cost Flash models or more capable Pro providers using structural signals, balancing cost, latency, and reasoning quality.

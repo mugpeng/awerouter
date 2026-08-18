@@ -2,19 +2,19 @@
 
 ![awerouter](../../../logo/logo.png)
 
-编程智能体（agent）有一笔让人不舒服的账：每个请求都发给同一个模型。十行代码的重构、横跨五个文件的重命名、"修个错别字"——全都按前沿模型的价格，打到你的前沿模型提供商那里。可智能体一天里干的活，大多只是例行公事。真正需要强模型的请求——12,000 token 的并发 bug、图像分析、凡是涉及网页搜索的——只占少数。你是在用 pro 的价格，干 flash 的活儿。
+用大模型有一笔让人不舒服的账：每个请求都发给同一个模型。十行代码的重构、横跨五个文件的重命名、"修个错别字"——全都按前沿模型的价格，按最贵的价格死死扣你的钱包。可智能体一天里干的活，大多只是例行公事。真正需要强模型的请求——12,000 token 的并发 bug、图像分析、网页搜索的、思考的等等诸如此类——只占少数。你是在用 pro 的价格，干 flash 的活儿。
 
-awerouter 给出的答案是智能路由。你在每个路由档案（routing profile）里配两个"提供商-模型"组合：一个 **flash** 目的地——快而便宜——接高频、轻量的任务；一个 **pro** 目的地——强而准——接复杂推理和关键决策。每个请求一到手就被分流，依据的是请求本身的结构。不靠关键词。不用 LLM 分类器。不为"怎么路由"多花一个 token。
+awerouter 给出的答案是智能路由。你在每个路由档案（routing profile）里配两个"提供商-模型"组合：一个 **flash**——快而便宜——接高频、轻量的任务；一个 **pro** ——强而准——接复杂推理和关键决策。每个请求一到手就被分流，依据的是请求本身的结构。不靠关键词。不用 LLM 分类器。不为"怎么路由"多花一个 token。
 
-awerouter 正是诞生于这份憋屈。而且在第一个赌注之上，它还押了第二个：路由器要有人配置、有人维护才有用——阈值要调、提供商要加、用量要解读。但这个人不必是你。awerouter 是为 AI 时代而造的工具：端到端都由智能体来打理。它出厂自带一份给智能体读的 README、一个给智能体用的技能、一个给智能体跑的 CLI。工具的学习成本，从你身上挪到了智能体身上。你只说要什么，智能体去想怎么干。
+awerouter 正是诞生于这份憋屈。而且awerouter 他做的更多：路由器要有人配置、有人维护才有用——阈值要调、提供商要加、用量要解读。但这个人不必是你。awerouter 是为 AI 时代而造的工具：端到端都由智能体来打理。它出厂自带一份给智能体读的 README、一个给智能体用的技能、一个给智能体跑的 CLI。工具的学习成本，从你身上挪到了智能体身上。你只说要什么，智能体去想怎么干。
 
 于是，我把整套安装交给了我的智能体。
 
-我对它说：*"Read https://github.com/mugpeng/awerouter/blob/main/README.ai.md and follow it."*（读一下这个 README 并照着做。）然后我去喝了杯咖啡。
+我对它说："Read https://github.com/mugpeng/awerouter/blob/main/README.ai.md and follow it."（读一下这个 README 并照着做。）然后我去喝了杯咖啡。
 
 回来的时候，awerouter 已经装好，技能已注册，两个配置文件躺在 `~/.config/awerouter/` 里，环境变量写进了 `~/.zshrc`。它读了模板配置，配好了三个提供商——便宜干 flash 活儿的 StepFun、管 pro 的 Anthropic，再加一个给 Opencode 会话用的 OpenAI 兼容端——并把它们接进了一个路由档案。
 
-然后它说：*"Run `awerouter serve` in your terminal. I will not start the daemon for you."*（在你的终端里运行 `awerouter serve`。守护进程我不会替你启动。）
+然后它说："Run `awerouter serve` in your terminal. I will not start the daemon for you."（在你的终端里运行 `awerouter serve`。守护进程我不会替你启动。）
 
 这就是安装智能体工具的新形态。安装是一个任务。智能体就是干任务的。所以我把任务交给了智能体。
 
@@ -116,7 +116,7 @@ awerouter usage savings
 
 最后一行最让人意外。大多数用户至少有一把密钥存在脑子里——不在任何文件里——因为是在另一台机器上配过一次，之后就再没腾出手把它落盘。智能体会读 `~/.zshrc`，找出缺什么，然后手把手带你补上。密钥只待在环境变量里，永远不进配置文件。
 
-## Claude Code、Codex、OpenCode，以及其他长尾客户端
+## Claude Code、Codex、OpenCode，和其他agent 平台
 
 同一个档案，跨客户端通用。
 
@@ -189,9 +189,11 @@ export ANTHROPIC_BASE_URL=http://127.0.0.1:20128
 
 ## 其他有意思的作品
 
-awerouter 是 aweteam 生态的一部分：
+awerouter 是我的awesome 工具生态的一部分：
 
-- **[aweskill](https://aweskill.webioinfo.top/)**——面向 47+ 种 AI 编程智能体的 CLI 优先技能包管理器
-- **[aweswitch](https://github.com/Webioinfo01/aweswitch)**——Claude Code、Codex、OpenCode 的智能体档案切换器；启动的会话直接指向 awerouter 守护进程
-- **[aweshelf](https://github.com/Webioinfo01/aweshelf)**——支持档案感知恢复的 AI 编程会话管理器
+- **[aweskill](https://aweskill.webioinfo.top/)** ——面向 47+ 种 AI 编程智能体的 CLI 优先技能包管理器
+- **[aweswitch](https://github.com/Webioinfo01/aweswitch)** ——Claude Code、Codex、OpenCode 的智能体档案切换器；启动的会话直接指向 awerouter 守护进程
+- **[aweshelf](https://github.com/Webioinfo01/aweshelf)** ——支持档案感知恢复的 AI 编程会话管理器
 - **[awescholar](https://github.com/Webioinfo01/awescholar)** — 自动化科学文献发现
+- **[awerouter](https://github.com/mugpeng/awerouter)** — 智能 LLM 路由器：基于请求的结构化信号，在 Flash（低成本）与 Pro（高能力）模型提供商之间自动分流，为 Agent 兼顾成本、速度与推理质量。
+

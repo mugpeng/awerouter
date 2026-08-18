@@ -206,15 +206,18 @@ export ANTHROPIC_BASE_URL=http://127.0.0.1:20128
 
 ## 路由逻辑
 
-三层 first-match-wins 管线，逐请求评估：
+first-match-wins 管线，逐请求评估：
 
 | 层 | 信号 | 决策 |
 |----|------|------|
 | L1 能力护栏 | body 含 `web_search` 工具 | `settings.webSearchModel`（默认 **pro**） |
 | L2 档位匹配 | `model == c1/flash` 或 `c1/think` | flash / pro |
-| L3 难度评分 | token（全部请求内容）超阈值，或含图片 | **pro**；否则 **flash** |
+| L3 难度评分 | token（全部请求内容）超阈值，或含图片 | **pro**；否则继续 |
+| L4 工具阶段 | 最近一次工具调用是搜索类（`grep`/`glob`/`ls`/`list`）或编辑类（`edit`/`write`/`apply_patch` 等） | 搜索 → **flash**，编辑 → **pro**（`settings.toolRouting`，`null` 关闭该规则） |
 
 CC 的 `/model` 选择器设置 tier model id（c1/flash / c1/pro / c1/think）。awerouter 直接读取该字段做路由——不猜语义、不用关键词、不跑分类器。
+
+L4 按"agent 刚做了什么"判断：搜索结果之后是廉价的机械动作（再搜、读命中文件），而刚发生编辑意味着正在写代码或验证代码。它排在 L3 之下是刻意的——已超过 `longContextThreshold` 的会话无论刚跑了什么工具都留在 pro，flash 不会拿到可能退化的超长上下文，会话内 flash→pro 单向升级的不变量也得以保持。搜索类工具名与 `searchResultDiscount` 检测共用同一集合（claude-code 的 `Grep`/`Glob`/`LS`、opencode 的 `grep`/`glob`/`list`）；编辑类覆盖 `Edit`/`Write`/`NotebookEdit`/`apply_patch`/`replace_in_file` 等，大小写不敏感匹配。
 
 ## 命令
 

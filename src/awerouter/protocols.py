@@ -60,14 +60,26 @@ TOKEN_TYPES = ("system", "messages", "tools", "tool_results", "tool_calls", "thi
 
 # File-search tools whose results inflate context cheaply (match lists, not
 # prose the model must reason over). L3 weighs their tokens against the
-# threshold at a discount — see effective_tokens. Names match
-# case-insensitively: claude-code sends Grep/Glob/LS, opencode sends
-# grep/glob/list (its directory listing).
-_FILE_SEARCH_TOOLS = frozenset({"grep", "glob", "ls", "list"})
+# threshold at a discount — see effective_tokens — and the tool-phase routing
+# layer sends their turns to flash. Names match case-insensitively:
+# claude-code sends Grep/Glob/LS, opencode sends grep/glob/list.
+FILE_SEARCH_TOOLS = frozenset({"grep", "glob", "ls", "list"})
 
 
 def _is_file_search(name) -> bool:
-    return isinstance(name, str) and name.lower() in _FILE_SEARCH_TOOLS
+    return isinstance(name, str) and name.lower() in FILE_SEARCH_TOOLS
+
+
+# Code-modification tools: the most recent call being one of these means the
+# agent is writing or verifying code — the tool-phase routing layer sends
+# those turns to pro. Case-insensitive; covers claude-code (Edit/Write/
+# NotebookEdit), opencode (edit/write), codex (apply_patch), and common
+# openai-chat agents (replace_in_file, write_to_file, apply_diff).
+EDIT_TOOLS = frozenset({
+    "edit", "write", "multiedit", "multi_edit", "notebookedit", "notebook_edit",
+    "applypatch", "apply_patch", "str_replace", "str_replace_editor",
+    "replace_in_file", "write_to_file", "apply_diff", "create_file",
+})
 
 
 # Shell-exec tool names whose command text decides search-ness. Codex wraps
@@ -190,6 +202,7 @@ def _extract_anthropic(body: dict) -> InspectResult:
     has_image = False
     tool_names: dict = {}   # tool_use id -> name; a call always precedes its result
     search_texts: list[str] = []
+    last_tool = ""
     for msg in messages:
         content = msg.get("content")
         if isinstance(content, str):
@@ -210,7 +223,10 @@ def _extract_anthropic(body: dict) -> InspectResult:
                         search_texts.append(text)
                 elif btype == "tool_use":
                     b["tool_calls"].append(_tool_use_input_text(block.get("input")))
-                    tool_names[block.get("id")] = block.get("name")
+                    name = block.get("name")
+                    tool_names[block.get("id")] = name
+                    if isinstance(name, str):
+                        last_tool = name.lower()
                 elif btype == "thinking":
                     b["thinking"].append(block.get("thinking", ""))
     token_count, breakdown = _summarize(b)
@@ -221,6 +237,7 @@ def _extract_anthropic(body: dict) -> InspectResult:
         message_count=len(messages),
         token_breakdown=breakdown,
         file_search_tokens=estimate_tokens(" ".join(t for t in search_texts if t)),
+        last_tool=last_tool,
     )
 
 
@@ -246,6 +263,7 @@ def _extract_openai_chat(body: dict) -> InspectResult:
     has_image = False
     tool_names: dict = {}   # tool_call id -> function name
     search_texts: list[str] = []
+    last_tool = ""
     for msg in messages:
         role = msg.get("role")
         if role == "system":
@@ -276,7 +294,10 @@ def _extract_openai_chat(body: dict) -> InspectResult:
         for call in msg.get("tool_calls") or []:
             if isinstance(call, dict) and isinstance(call.get("function"), dict):
                 b["tool_calls"].append(call["function"].get("arguments") or "")
-                tool_names[call.get("id")] = call["function"].get("name")
+                name = call["function"].get("name")
+                tool_names[call.get("id")] = name
+                if isinstance(name, str):
+                    last_tool = name.lower()
     token_count, breakdown = _summarize(b)
     return InspectResult(
         token_count=token_count,
@@ -285,6 +306,7 @@ def _extract_openai_chat(body: dict) -> InspectResult:
         message_count=len(messages),
         token_breakdown=breakdown,
         file_search_tokens=estimate_tokens(" ".join(t for t in search_texts if t)),
+        last_tool=last_tool,
     )
 
 
@@ -327,6 +349,7 @@ def _extract_openai_responses(body: dict) -> InspectResult:
     message_count = 0
     search_calls: dict = {}   # call_id -> output counts as file search
     search_texts: list[str] = []
+    last_tool = ""
     for item in input_value or []:
         if not isinstance(item, dict):
             continue
@@ -339,6 +362,8 @@ def _extract_openai_responses(body: dict) -> InspectResult:
                     _is_file_search(item.get("name"))
                     or _shell_is_search(item.get("name"), item.get("arguments"))
                 )
+                if isinstance(item.get("name"), str):
+                    last_tool = item["name"].lower()
             elif itype == "function_call_output":
                 text = _block_text(item.get("output"))
                 b["tool_results"].append(text)
@@ -366,6 +391,7 @@ def _extract_openai_responses(body: dict) -> InspectResult:
         message_count=message_count,
         token_breakdown=breakdown,
         file_search_tokens=estimate_tokens(" ".join(t for t in search_texts if t)),
+        last_tool=last_tool,
     )
 
 

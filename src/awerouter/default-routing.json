@@ -3,6 +3,10 @@
     "backgroundModel": "flash",
     "thinkModel": "pro",
     "webSearchModel": "pro",
+    "toolRouting": {
+      "search": "flash",
+      "edit": "pro"
+    },
     "longContextAuto": {
       "percentile": 95,
       "windowDays": 7,

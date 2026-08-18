@@ -37,6 +37,20 @@ class AutoThresholdConfig:
 
 
 @dataclass
+class ToolRoutingConfig:
+    """Forced routing by agent phase, keyed on the most recent tool call in
+    the resent history (routing.json settings.toolRouting).
+
+    Values are destination keys ("flash"/"pro"); null disables that rule.
+    A search-phase turn (Grep/Glob/LS just returned) decides the next cheap
+    mechanical step; an edit-phase turn means code is being written or
+    verified. The layer sits below L3: long-context sessions stay pro.
+    """
+    search: Optional[str] = "flash"
+    edit: Optional[str] = "pro"
+
+
+@dataclass
 class Settings:
     """Global routing settings (shared across all profiles)."""
     background_model: str = "flash"   # L2 tier-label for background → flash dest
@@ -44,6 +58,7 @@ class Settings:
     web_search_model: str = "pro"     # L1 web_search destination key
     search_result_discount: float = 0.3  # L3 weight of file-search (Grep/Glob/LS) result tokens; 1 = off
     long_context_auto: AutoThresholdConfig = field(default_factory=AutoThresholdConfig)
+    tool_routing: ToolRoutingConfig = field(default_factory=ToolRoutingConfig)
 
 
 @dataclass
@@ -68,6 +83,9 @@ class InspectResult:
     # Estimated tokens of tool results from file-search tools (Grep/Glob/LS);
     # L3 weighs these against the threshold at settings.searchResultDiscount.
     file_search_tokens: int = 0
+    # Lowercased name of the most recent tool call in the history ("" if none);
+    # the tool-phase routing layer keys on it.
+    last_tool: str = ""
 
 
 @dataclass
