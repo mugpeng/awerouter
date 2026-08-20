@@ -217,6 +217,7 @@ awerouter usage log --all       # 显示过滤窗口内的所有记录
 ## awerouter 系列文章
 
 - [awerouter：不怕deepseek 涨价，一句话让智能路由给你省钱](https://mp.weixin.qq.com/s/8jucVeQWQRjCIUEXxj-fHQ)
+- [awerouter 更新: 数据看板告诉你省了多少](https://mp.weixin.qq.com/s/V1tPgz-jEekAMRdLMzGZGQ)
 
 
 
