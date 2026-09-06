@@ -66,6 +66,7 @@ def append(log: RequestLog) -> None:
             "tokens": log.tokens,
             "file_search_tokens": log.file_search_tokens,
             "rtk_saved": log.rtk_saved,
+            "odcp_saved": log.odcp_saved,
             "protocol": log.protocol,
             "agent": log.agent,
             "codex_retried": log.codex_retried,
@@ -132,6 +133,7 @@ def tail(n: int | None = 20) -> list[RequestLog]:
                 tokens=data.get("tokens") or {},
                 file_search_tokens=data.get("file_search_tokens", 0),
                 rtk_saved=data.get("rtk_saved", 0),
+                odcp_saved=data.get("odcp_saved", 0),
                 protocol=data.get("protocol", ""),
                 agent=data.get("agent", ""),
                 codex_retried=data.get("codex_retried", False),
@@ -196,6 +198,29 @@ def rtk_totals(since=None, profile=None) -> dict:
             continue
         if data.get("rtk_saved", 0):
             out["saved"] += data["rtk_saved"]
+            out["requests"] += 1
+    return out
+
+
+def odcp_totals(since=None, profile=None) -> dict:
+    """Estimated input tokens odcp pruning dropped, plus how many requests
+    were pruned. token_count in the log is post-pruning, so this is
+    would-have-been extra — not a subset of the logged totals."""
+    out = {"saved": 0, "requests": 0}
+    f = _log_file()
+    if not f.exists():
+        return out
+    for line in f.read_text(encoding="utf-8").splitlines():
+        if not line:
+            continue
+        try:
+            data = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not _passes(data, since, profile):
+            continue
+        if data.get("odcp_saved", 0):
+            out["saved"] += data["odcp_saved"]
             out["requests"] += 1
     return out
 

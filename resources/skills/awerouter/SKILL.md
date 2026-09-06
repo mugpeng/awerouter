@@ -19,7 +19,7 @@ This skill covers **configuring** awerouter routing, inspecting profiles, and in
 
 ## Core Concepts
 
-awerouter is a transparent same-protocol proxy for coding-agent traffic. It does not translate between protocols. Request bodies pass through untouched unless a profile opts into `rtk` tool-result compression.
+awerouter is a transparent same-protocol proxy for coding-agent traffic. It does not translate between protocols. Request bodies pass through untouched unless a profile opts into `rtk` tool-result compression or `odcp` context pruning.
 
 Key config dir: `~/.config/awerouter/` (override with `AWEROUTER_CONFIG_DIR`).
 Request log dir: `~/.local/state/awerouter/` (override with `AWEROUTER_LOG_DIR`).
@@ -109,6 +109,7 @@ Rules:
 - Each profile needs `protocol`, `longContextThreshold`, and `destinations`. `protocol` accepts one id or a list (`["anthropic", "openai-chat"]`) — a list serves several wire protocols on one port (clients pick by endpoint path); every destination provider must exist in each served providers.json group.
 - Supported protocols: `anthropic`, `openai-chat`, `openai-responses`.
 - Optional `"rtk": true` enables RTK tool-result compression (default off): verbose tool output (git diff/status/log, grep, listings, build logs) is compressed before forwarding. Fail-open, deterministic; error results and short content pass through. Per-request opt-out header: `X-Awerouter-Token-Saver: off`. After enabling, re-run `awerouter usage calibrate` (thresholds tuned on uncompressed traffic over-trigger pro).
+- Optional `"odcp": true` (or `{"dedup": bool, "purgeErrors": bool | {"turns": int}}`) enables context pruning beside rtk (default off): repeated identical tool calls (same tool + arguments) keep only the newest output; errored calls older than `turns` user messages (default 4) lose their input strings, error text stays (anthropic only). Editors and task/planning tools protected; trailing turn untouched; runs before rtk. Same fail-open, `X-Awerouter-Token-Saver: off` bypass, and `usage calibrate` advice.
 
 ### Gateway mode (serve all)
 

@@ -24,7 +24,7 @@
   </p>
 </div>
 
-> Transparent proxy that splits coding-agent traffic across providers by cost and capability. Same-protocol passthrough — no translation. Optional per-profile tool-result compression (RTK, off by default).
+> Transparent proxy that splits coding-agent traffic across providers by cost and capability. Same-protocol passthrough — no translation. Optional per-profile token saving (RTK compression + ODCP pruning, off by default).
 
 ## Quick Start
 
@@ -627,6 +627,30 @@ Coding agents resubmit the whole conversation every turn, and most of it is tool
 - Compression runs before routing, and `/v1/messages/count_tokens` is compressed too, so L3 decisions and usage logs match what is actually billed. After enabling RTK, re-run `usage calibrate` — a threshold tuned on uncompressed traffic over-triggers pro (`"auto"` self-corrects after its window).
 
 Compression is inspired by [rtk](https://github.com/rtk-ai/rtk) (Apache 2.0) and [9router](https://github.com/decolua/9router)'s JS port (MIT); this implementation is a from-scratch Python rewrite. The request log records the estimated saved tokens per request.
+
+### ODCP pruning (dedup + purgeErrors)
+
+RTK shrinks each tool output's size; ODCP drops content that no longer earns its tokens. One pairing pass over the history applies two rules:
+
+- **Dedup** — repeated identical tool calls (same tool, same normalized arguments) keep only the newest output; older ones become a one-line placeholder. Re-reading a file or re-running a command costs one line instead of N full outputs.
+- **purgeErrors** — once a failed tool call is `purgeErrors.turns` user messages old (default 4), its input strings become a placeholder; the error text itself stays, so the model still sees what failed. Anthropic only — the other protocols carry no error mark on the wire.
+
+```json
+"cc-router-1": {
+  "protocol": "anthropic",
+  "longContextThreshold": 8000,
+  "odcp": true,
+  "destinations": { "flash": "stepfun,step-3.7-flash", "pro": "anthropic,claude-opus-5" }
+}
+```
+
+`"odcp": true` enables both strategies with defaults; an object tunes them — `"odcp": {"dedup": false, "purgeErrors": {"turns": 2}}`. The guardrails:
+
+- Editors (Edit/Write/apply_patch/…) and task/planning tools are never rewritten; replacements that wouldn't shrink the body are skipped; the trailing turn is always untouched (dedup keeps the newest, purge requires age).
+- Same fail-open contract and `X-Awerouter-Token-Saver: off` escape hatch as RTK. ODCP runs **before** RTK: dropped outputs never reach the compressor, and what remains gets compressed as usual.
+- Unlike RTK, pruning is not prompt-cache-stable across turns by design: a new duplicate rewrites an earlier message (was verbatim, becomes a placeholder) and an error crossing the age threshold rewrites once. Each such event trades a one-time cache miss for the tokens saved.
+
+Behavior follows [Opencode-DCP](https://github.com/Opencode-DCP/opencode-dynamic-context-pruning)'s public documentation (AGPL-3.0); this is an independent implementation for awerouter's wire protocols, not a translation of its source. Savings are logged per request (`odcp_saved`) and reported by `awerouter usage` next to rtk's.
 
 ## Background serving & hot reload
 

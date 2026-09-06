@@ -19,7 +19,7 @@ from awerouter import __version__
 from awerouter.claude import AUTH_SENTINEL as CLAUDE_SENTINEL
 from awerouter.codex import AUTH_SENTINEL
 from awerouter.protocols import PROTOCOL_IDS
-from awerouter.types import AutoThresholdConfig, Destination, Provider, RoutingProfile, Settings, ToolRoutingConfig
+from awerouter.types import AutoThresholdConfig, Destination, OdcpConfig, Provider, RoutingProfile, Settings, ToolRoutingConfig
 
 # ---------------------------------------------------------------------------
 # Constants (mirror aweswitch cli.py conventions exactly)
@@ -359,7 +359,7 @@ _SETTINGS_KEYS = frozenset({
 
 # Keys that belong to the profile body itself (settings keys may join them).
 _PROFILE_KEYS = frozenset({
-    "protocol", "longContextThreshold", "destinations", "port", "rtk",
+    "protocol", "longContextThreshold", "destinations", "port", "rtk", "odcp",
     "backups",
 })
 
@@ -370,6 +370,40 @@ def _model_field(raw: dict, key: str, inherited: str, where: str, hint: str = ""
     if value not in ("flash", "pro"):
         die(f"{where} '{key}' must be 'flash' or 'pro'{hint}, got: {value!r}")
     return value
+
+
+def _parse_odcp(name: str, raw) -> "OdcpConfig | None":
+    """'odcp': true enables both strategies with defaults; an object tunes
+    them ({"dedup": false, "purgeErrors": {"turns": 4}}). Absent/false = off,
+    the transparent default (same convention as rtk)."""
+    if raw is False or raw is None:
+        return None
+    if raw is True:
+        return OdcpConfig()
+    if not isinstance(raw, dict):
+        die(f"profile '{name}': 'odcp' must be true, false, or an object, got: {raw!r}")
+    unknown = set(raw) - {"dedup", "purgeErrors"}
+    if unknown:
+        die(f"profile '{name}': unknown odcp key(s): {', '.join(sorted(unknown))}; "
+            "expected 'dedup' and/or 'purgeErrors'")
+    dedup = raw.get("dedup", True)
+    if not isinstance(dedup, bool):
+        die(f"profile '{name}': odcp 'dedup' must be true or false, got: {dedup!r}")
+    purge = raw.get("purgeErrors", True)
+    turns = 4
+    if isinstance(purge, dict):
+        unknown = set(purge) - {"turns"}
+        if unknown:
+            die(f"profile '{name}': unknown odcp purgeErrors key(s): "
+                f"{', '.join(sorted(unknown))}; expected 'turns'")
+        turns = purge.get("turns", 4)
+        purge = True
+    if not isinstance(purge, bool):
+        die(f"profile '{name}': odcp 'purgeErrors' must be true, false, or an object, "
+            f"got: {purge!r}")
+    if isinstance(turns, bool) or not isinstance(turns, int) or turns < 1:
+        die(f"profile '{name}': odcp purgeErrors 'turns' must be an integer >= 1, got: {turns!r}")
+    return OdcpConfig(dedup=dedup, purge_errors=purge, purge_turns=turns)
 
 
 def _parse_settings(raw: dict, base: Settings | None = None,
@@ -476,6 +510,7 @@ def load_routing(path: Optional[Path] = None) -> tuple[Settings, dict[str, Routi
         rtk_raw = body.get("rtk", False)
         if not isinstance(rtk_raw, bool):
             die(f"profile '{name}': 'rtk' must be true or false, got: {rtk_raw!r}")
+        odcp = _parse_odcp(name, body.get("odcp", False))
         # Per-profile settings override the global block key by key (nested
         # blocks field by field); keys absent from the body inherit everything.
         raw_psettings = {k: v for k, v in body.items() if k in _SETTINGS_KEYS}
@@ -523,6 +558,7 @@ def load_routing(path: Optional[Path] = None) -> tuple[Settings, dict[str, Routi
             port=port_raw,
             threshold_auto=threshold_auto,
             rtk=rtk_raw,
+            odcp=odcp,
             settings=psettings,
             settings_overrides=raw_psettings,
             backups=backups,
@@ -808,6 +844,11 @@ def format_routing_display(settings: Settings, profiles: dict[str, RoutingProfil
             entry["port"] = p.port
         if p.rtk:
             entry["rtk"] = True
+        if p.odcp is not None:
+            entry["odcp"] = {
+                "dedup": p.odcp.dedup,
+                "purgeErrors": {"turns": p.odcp.purge_turns} if p.odcp.purge_errors else False,
+            }
         # mirrors the config shape: overridden settings keys sit flat in the
         # profile body, next to protocol/destinations
         entry.update(p.settings_overrides)

@@ -684,7 +684,7 @@ def _settings_or_default(profile_name=None):
 
 def _usage_header(since, profile_name):
     """Print search-discount context for the filtered window."""
-    from awerouter.logging import rtk_totals, tail as _tail
+    from awerouter.logging import odcp_totals, rtk_totals, tail as _tail
     settings = _settings_or_default(profile_name)
     discount = settings.search_result_discount if settings else 0.3
     cutoff = _parse_since(since) if since else None
@@ -702,6 +702,10 @@ def _usage_header(since, profile_name):
     if rtk["saved"]:
         click.echo(f"rtk: saved {rtk['saved']:,} input tokens "
                    f"({rtk['requests']}/{len(entries)} requests compressed)")
+    odcp = odcp_totals(cutoff, profile_name)
+    if odcp["saved"]:
+        click.echo(f"odcp: saved {odcp['saved']:,} input tokens "
+                   f"({odcp['requests']}/{len(entries)} requests pruned)")
 
 
 def _usage_log(n, since=None, profile_name=None, tokens_mode=False):
@@ -738,10 +742,11 @@ def _usage_log(n, since=None, profile_name=None, tokens_mode=False):
         status_s = str(e.status) if e.status is not None else "-"
         dur_s = f"/{_fmt_ms(e.duration_ms)}" if e.duration_ms else ""
         rtk_s = f"  rtk=+{e.rtk_saved:,}" if e.rtk_saved else ""
+        odcp_s = f"  odcp=+{e.odcp_saved:,}" if e.odcp_saved else ""
         retry_s = "  401-retry" if e.codex_retried else ""
         click.echo(
             f"{head}status={status_s:>3}{retry_s}  {_fmt_ms(e.ms)}{dur_s}  "
-            f"tokens={e.token_count}  in={e.model_in}{rtk_s}"
+            f"tokens={e.token_count}  in={e.model_in}{rtk_s}{odcp_s}"
         )
 
 
@@ -1003,7 +1008,7 @@ def savings(since, profile_name):
 
 
 def _usage_savings(since, profile_name):
-    from awerouter.logging import cadence, rtk_totals, token_totals
+    from awerouter.logging import cadence, odcp_totals, rtk_totals, token_totals
     cutoff = _window_cutoff(since, profile_name)
     t = token_totals(cutoff, profile_name)
     if not t:
@@ -1029,6 +1034,11 @@ def _usage_savings(since, profile_name):
         click.echo()
         click.echo("rtk compression (input trimmed before billing, stacks with flash offload):")
         click.echo(f"  saved {rtk['saved']:,} input tokens across {rtk['requests']} requests")
+    odcp = odcp_totals(cutoff, profile_name)
+    if odcp["saved"]:
+        click.echo()
+        click.echo("odcp pruning (superseded tool-call content dropped, stacks with the above):")
+        click.echo(f"  saved {odcp['saved']:,} input tokens across {odcp['requests']} requests")
     click.echo()
     click.echo("vs a pro-only setup:")
     click.echo(f"  pro input billed   {total_tok:,} → {pro['tokens']:,}")

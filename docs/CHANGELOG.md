@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+ODCP context pruning joins RTK in the token-saver layer: where RTK shrinks each tool output's size, ODCP drops whole superseded content — repeated identical calls and stale errored ones.
+
+### Added
+- `odcp` profile flag (`"odcp": true`, or `{"dedup": bool, "purgeErrors": bool | {"turns": int}}`, default off). Before routing and before RTK, one pairing pass over the history applies two rules: **dedup** keeps only the newest output of repeated identical tool calls (same tool + normalized arguments), replacing older ones with a one-line placeholder; **purgeErrors** strips a failed call's input strings once it is `turns` user messages old (default 4), keeping the error text (anthropic only — other protocols carry no error mark on the wire). Editors and task/planning tools are never rewritten; replacements that wouldn't shrink the body are skipped; the trailing turn is untouched. Deterministic and fail-open, with the `X-Awerouter-Token-Saver: off` bypass; `/v1/messages/count_tokens` prunes identically. Unlike RTK, pruning rewrites earlier history when a new duplicate appears or an error crosses the age threshold — an accepted prompt-cache trade. Behavior follows [Opencode-DCP](https://github.com/Opencode-DCP/opencode-dynamic-context-pruning)'s public documentation (AGPL-3.0); implemented from that description, not translated. `odcp_saved` is logged per request and reported by `usage` next to rtk's; serve banner and `serve status` show `odcp` when on.
+
 ## v0.6.1
 
 Robust resident service management: `serve restart` one-word reloads, crash-proof request handling, and macOS installs that actually stick.

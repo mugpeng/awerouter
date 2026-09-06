@@ -22,7 +22,7 @@ from awerouter.config import (
     save_provider,
     validate_profiles,
 )
-from awerouter.types import Destination, Provider, RoutingProfile, Settings, ToolRoutingConfig
+from awerouter.types import Destination, OdcpConfig, Provider, RoutingProfile, Settings, ToolRoutingConfig
 
 
 # ---------------------------------------------------------------------------
@@ -1328,6 +1328,72 @@ class TestRtkFlag:
         data = json.loads(format_routing_display(settings, profiles))
         assert "rtk" not in data["off"]
         assert data["on"]["rtk"] is True
+
+
+# ---------------------------------------------------------------------------
+# odcp profile flag
+# ---------------------------------------------------------------------------
+
+class TestOdcpFlag:
+    _BASE = {"protocol": "anthropic", "longContextThreshold": 1,
+             "destinations": {"flash": "p,m", "pro": "p,m"}}
+
+    def test_default_off(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+        _write_config(tmp_path, {}, {"cc-1": self._BASE})
+        _, profiles = load_routing()
+        assert profiles["cc-1"].odcp is None
+
+    def test_true_yields_defaults(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+        _write_config(tmp_path, {}, {"cc-1": {**self._BASE, "odcp": True}})
+        _, profiles = load_routing()
+        assert profiles["cc-1"].odcp == OdcpConfig()
+
+    def test_object_form_parsed(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+        _write_config(tmp_path, {}, {"cc-1": {**self._BASE, "odcp": {
+            "dedup": False, "purgeErrors": {"turns": 2}}}})
+        _, profiles = load_routing()
+        assert profiles["cc-1"].odcp == OdcpConfig(dedup=False, purge_errors=True, purge_turns=2)
+
+    def test_purge_errors_false(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+        _write_config(tmp_path, {}, {"cc-1": {**self._BASE, "odcp": {"purgeErrors": False}}})
+        _, profiles = load_routing()
+        assert profiles["cc-1"].odcp == OdcpConfig(purge_errors=False)
+
+    @pytest.mark.parametrize("bad", ["yes", 1])
+    def test_non_bool_non_object_dies(self, tmp_path, monkeypatch, bad):
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+        _write_config(tmp_path, {}, {"cc-1": {**self._BASE, "odcp": bad}})
+        with pytest.raises(SystemExit, match="'odcp'"):
+            load_routing()
+
+    def test_unknown_key_dies(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+        _write_config(tmp_path, {}, {"cc-1": {**self._BASE, "odcp": {"dedup": True, "nope": 1}}})
+        with pytest.raises(SystemExit, match="unknown odcp key"):
+            load_routing()
+
+    def test_bad_turns_dies(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+        _write_config(tmp_path, {}, {"cc-1": {**self._BASE, "odcp": {"purgeErrors": {"turns": 0}}}})
+        with pytest.raises(SystemExit, match="'turns'"):
+            load_routing()
+
+    def test_display_round_trips_when_set(self):
+        settings = Settings()
+        profiles = {
+            "off": RoutingProfile("off", "anthropic", 8000, {
+                "flash": Destination("p", "m1"), "pro": Destination("p", "m2")}),
+            "on": RoutingProfile("on", "anthropic", 8000, {
+                "flash": Destination("p", "m1"), "pro": Destination("p", "m2")},
+                odcp=OdcpConfig(purge_turns=6)),
+        }
+        data = json.loads(format_routing_display(settings, profiles))
+        assert "odcp" not in data["off"]
+        assert data["on"]["odcp"] == {"dedup": True, "purgeErrors": {"turns": 6}}
 
 
 # ---------------------------------------------------------------------------

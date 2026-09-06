@@ -23,7 +23,7 @@ import aiohttp
 from aiohttp import web
 
 from awerouter import __version__
-from awerouter import rtk
+from awerouter import odcp, rtk
 from awerouter import runtime
 from awerouter.claude import (
     AUTH_SENTINEL as CLAUDE_SENTINEL,
@@ -66,15 +66,22 @@ from awerouter.vision import (
 )
 
 
-# Per-request opt-out for rtk compression (value "off" disables it), so a
-# debugging session can see raw tool output without touching routing.json.
+# Per-request opt-out for rtk compression and odcp pruning (value "off"
+# disables both), so a debugging session can see raw tool output without
+# touching routing.json.
 TOKEN_SAVER_HEADER = "x-awerouter-token-saver"
 
 
-def _rtk_enabled(request: web.Request, profile) -> bool:
-    if not profile.rtk:
-        return False
+def _token_saver_on(request: web.Request) -> bool:
     return request.headers.get(TOKEN_SAVER_HEADER, "").lower() != "off"
+
+
+def _rtk_enabled(request: web.Request, profile) -> bool:
+    return profile.rtk and _token_saver_on(request)
+
+
+def _odcp_enabled(request: web.Request, profile) -> bool:
+    return profile.odcp is not None and _token_saver_on(request)
 
 
 # ---------------------------------------------------------------------------
@@ -362,13 +369,14 @@ class _RoutingState:
     """Mutable routing state shared across the retry loop."""
 
     def __init__(self, profile, settings, body: dict, agent: str = "", rtk_saved: int = 0,
-                 protocol: str = "", resolve_model: "str | None" = None,
+                 odcp_saved: int = 0, protocol: str = "", resolve_model: "str | None" = None,
                  direct_dest: Destination | None = None, providers: dict | None = None):
         self.profile = profile
         self.body = body
         self.inbound_model = body.get("model") or ""
         self.agent = agent
         self.rtk_saved = rtk_saved
+        self.odcp_saved = odcp_saved
         self.protocol = protocol
         self.direct_dest = direct_dest
         if direct_dest is None:
@@ -435,6 +443,7 @@ def _log_failure(state: _RoutingState, request_id: str, t0: float, status: int) 
         tokens=state.result.inspect.token_breakdown,
         file_search_tokens=state.result.inspect.file_search_tokens,
         rtk_saved=state.rtk_saved,
+        odcp_saved=state.odcp_saved,
         profile=state.log_profile,
         protocol=state.protocol,
         agent=state.agent,
@@ -612,9 +621,19 @@ async def _proxy_flow(request: web.Request, endpoint_protocol: str) -> web.Strea
         await _bridge_images(request_id, session, body, endpoint_protocol,
                              profile, providers, settings)
 
-    # rtk compression before routing: L3 decisions, effective_tokens, and the
-    # usage log then reflect what is actually sent (and billed) upstream.
-    # Runs once — retries and the flash→pro fallback reuse the same body.
+    # odcp pruning before rtk: whole superseded outputs become one-line
+    # placeholders first, then rtk compresses the size of what remains. Both
+    # run before routing: L3 decisions, effective_tokens, and the usage log
+    # reflect what is actually sent (and billed) upstream. Runs once —
+    # retries and the flash→pro fallback reuse the same body.
+    odcp_saved = 0
+    if _odcp_enabled(request, profile) and direct_dest is None:
+        odcp_stats = odcp.prune_body(body, endpoint_protocol, profile.odcp)
+        line = odcp.format_log(odcp_stats)
+        if line:
+            print(line)
+        odcp_saved = odcp_stats.saved_tokens if odcp_stats else 0
+
     rtk_saved = 0
     if _rtk_enabled(request, profile) and direct_dest is None:
         stats = rtk.compress_body(body, endpoint_protocol)
@@ -625,7 +644,7 @@ async def _proxy_flow(request: web.Request, endpoint_protocol: str) -> web.Strea
 
     state = _RoutingState(profile, settings, body,
                           _agent_from_ua(request.headers.get("User-Agent", "")),
-                          rtk_saved, endpoint_protocol, resolve_model,
+                          rtk_saved, odcp_saved, endpoint_protocol, resolve_model,
                           direct_dest, providers)
 
     while True:
@@ -750,6 +769,7 @@ async def _proxy_flow(request: web.Request, endpoint_protocol: str) -> web.Strea
                 tokens=state.result.inspect.token_breakdown,
                 file_search_tokens=state.result.inspect.file_search_tokens,
                 rtk_saved=state.rtk_saved,
+                odcp_saved=state.odcp_saved,
                 profile=state.log_profile,
                 protocol=state.protocol,
                 agent=state.agent,
@@ -812,6 +832,7 @@ async def _proxy_flow(request: web.Request, endpoint_protocol: str) -> web.Strea
             tokens=state.result.inspect.token_breakdown,
             file_search_tokens=state.result.inspect.file_search_tokens,
             rtk_saved=state.rtk_saved,
+            odcp_saved=state.odcp_saved,
             profile=state.log_profile,
             protocol=state.protocol,
             agent=state.agent,
@@ -919,8 +940,10 @@ async def handle_count_tokens(request: web.Request) -> web.Response:
         resolve_model = None
         direct_dest = None
 
-    # Same compression as /v1/messages: the client's context-window estimate
-    # must match what actually gets sent upstream.
+    # Same pruning and compression as /v1/messages: the client's
+    # context-window estimate must match what actually gets sent upstream.
+    if _odcp_enabled(request, profile) and direct_dest is None:
+        odcp.prune_body(body, "anthropic", profile.odcp)
     if _rtk_enabled(request, profile) and direct_dest is None:
         rtk.compress_body(body, "anthropic")
 
@@ -1463,6 +1486,8 @@ async def _serve(host: str, port: int, providers: dict, profile, settings,
         print(f"  port          -> {profile.port} (from routing.json; --port overrides)")
     if profile.rtk:
         print("  rtk           -> on (tool-result compression)")
+    if profile.odcp is not None:
+        print("  odcp          -> on (dedup + errored-call input purge)")
     if settings.image_bridge:
         bd = profile.destinations[settings.image_model]
         print(f"  image bridge  -> on ({bd.provider_name}/{bd.model} transcribes "
@@ -1629,6 +1654,8 @@ async def _serve_gateway(host: str, port: int, port_explicit: bool = False,
             line += f"  L3>{e.profile.long_context_threshold:,}"
         if e.profile.rtk:
             line += "  rtk"
+        if e.profile.odcp is not None:
+            line += "  odcp"
         if e.profile.backups:
             line += (f"  fb flash={_failover_chain(e.profile, 'flash')}"
                      f" pro={_failover_chain(e.profile, 'pro')}")

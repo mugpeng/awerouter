@@ -39,23 +39,21 @@ def _routing():
 
 
 class TestSavings:
-    def _seed_logs(self, monkeypatch, tmp_path, rtk=(0, 0, 0)):
+    def _seed_logs(self, monkeypatch, tmp_path, rtk=(0, 0, 0), odcp=(0, 0, 0)):
         from awerouter.logging import append
         from awerouter.types import RequestLog
         log_dir = tmp_path / "logs"
         monkeypatch.setenv("AWEROUTER_LOG_DIR", str(log_dir))
-        append(RequestLog(ts="2026-01-01T00:00:00+00:00", request_id="r1", model_in="auto",
-                          label="default", destination="flash", provider="p", model_out="m",
-                          status=200, ms=1, bytes=1, token_count=100, profile="cc-1",
-                          rtk_saved=rtk[0]))
-        append(RequestLog(ts="2026-01-01T00:01:00+00:00", request_id="r2", model_in="pro",
-                          label="think", destination="pro", provider="p", model_out="m",
-                          status=200, ms=1, bytes=1, token_count=30, profile="cc-1",
-                          rtk_saved=rtk[1]))
-        append(RequestLog(ts="2026-01-01T00:12:00+00:00", request_id="r3", model_in="auto",
-                          label="default→fallback", destination="pro", provider="p", model_out="m",
-                          status=200, ms=1, bytes=1, token_count=20, profile="cc-1",
-                          rtk_saved=rtk[2]))
+        rows = (
+            ("r1", "2026-01-01T00:00:00+00:00", "auto", "default", "flash", 100, rtk[0], odcp[0]),
+            ("r2", "2026-01-01T00:01:00+00:00", "pro", "think", "pro", 30, rtk[1], odcp[1]),
+            ("r3", "2026-01-01T00:12:00+00:00", "auto", "default→fallback", "pro", 20, rtk[2], odcp[2]),
+        )
+        for rid, ts, model_in, label, dest, tokens, rtk_saved, odcp_saved in rows:
+            append(RequestLog(ts=ts, request_id=rid, model_in=model_in,
+                              label=label, destination=dest, provider="p", model_out="m",
+                              status=200, ms=1, bytes=1, token_count=tokens, profile="cc-1",
+                              rtk_saved=rtk_saved, odcp_saved=odcp_saved))
 
     def test_no_logs(self, tmp_path, monkeypatch):
         _setup(tmp_path, monkeypatch)
@@ -112,6 +110,33 @@ class TestSavings:
             assert r.exit_code == 0, r.output
             assert "rtk:" not in r.output
             assert "rtk compression" not in r.output
+
+    def test_odcp_shown_when_saved(self, tmp_path, monkeypatch):
+        _setup(tmp_path, monkeypatch, _providers(), _routing())
+        self._seed_logs(monkeypatch, tmp_path, odcp=(300, 0, 100))
+        r = CliRunner().invoke(cli, ["usage", "savings"])
+        assert r.exit_code == 0, r.output
+        assert "odcp: saved 400 input tokens (2/3 requests pruned)" in r.output
+        assert "odcp pruning (superseded tool-call content dropped, stacks with the above):" in r.output
+        assert "saved 400 input tokens across 2 requests" in r.output
+
+    def test_odcp_marker_in_usage_log(self, tmp_path, monkeypatch):
+        _setup(tmp_path, monkeypatch, _providers(), _routing())
+        self._seed_logs(monkeypatch, tmp_path, odcp=(300, 0, 100))
+        r = CliRunner().invoke(cli, ["usage", "log"])
+        assert r.exit_code == 0, r.output
+        assert "odcp=+300" in r.output
+        assert "odcp=+100" in r.output
+        assert r.output.count("odcp=+") == 2  # zero-saving requests stay unmarked
+
+    def test_odcp_hidden_when_nothing_saved(self, tmp_path, monkeypatch):
+        _setup(tmp_path, monkeypatch, _providers(), _routing())
+        self._seed_logs(monkeypatch, tmp_path)
+        for cmd in (["usage", "savings"], ["usage", "log"]):
+            r = CliRunner().invoke(cli, cmd)
+            assert r.exit_code == 0, r.output
+            assert "odcp:" not in r.output
+            assert "odcp pruning" not in r.output
             assert "rtk=+" not in r.output
 
 

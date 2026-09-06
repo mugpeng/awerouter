@@ -27,7 +27,7 @@ from awerouter.server import (
     _serve,
     create_app,
 )
-from awerouter.types import Destination, Provider, RoutingProfile, Settings
+from awerouter.types import Destination, OdcpConfig, Provider, RoutingProfile, Settings
 
 
 ROUTING = RoutingProfile(
@@ -1689,6 +1689,126 @@ class TestRtk:
         asyncio.run(t())
         out = capsys.readouterr().out
         assert "rtk" in out and "tool-result compression" in out
+
+
+class TestOdcp:
+    """odcp pruning: opt-in per profile, runs before rtk, applied before
+    upstream forwarding."""
+
+    ARGS = {"command": "cat config.py"}
+    # grep output that rtk genuinely shrinks (for the combined-order test)
+    GREP = "\n".join(f"src/file{i % 3}.py:{i * 4 + 1}:def helper_{i}()" for i in range(45))
+    NOTE = "[odcp: superseded output of an identical earlier tool call removed]"
+
+    def _profile(self, **kw):
+        return RoutingProfile("test", "anthropic", 32, {
+            "flash": Destination("stepfun", "step-3.5-flash"),
+            "pro": Destination("anthropic", "claude-opus-5"),
+        }, **kw)
+
+    def _body(self, payload):
+        def pair(i):
+            return [
+                {"role": "assistant", "content": [
+                    {"type": "tool_use", "id": f"t{i}", "name": "Bash",
+                     "input": dict(self.ARGS)}]},
+                {"role": "user", "content": [
+                    {"type": "tool_result", "tool_use_id": f"t{i}", "content": payload}]},
+            ]
+        return {"model": "auto", "messages": [{"role": "user", "content": "go"},
+                                              *pair(1), *pair(2)]}
+
+    def _upstream_capture(self, captured):
+        async def up(request):
+            body = await request.json()
+            results = [b for m in body["messages"] if isinstance(m.get("content"), list)
+                       for b in m["content"] if b.get("type") == "tool_result"]
+            captured["first"] = results[0]["content"]
+            captured["second"] = results[1]["content"]
+            return web.json_response({"model": body["model"]})
+
+        up_app = web.Application()
+        up_app.router.add_post("/v1/messages", up)
+        return TestServer(up_app)
+
+    def _send(self, profile, body, headers=None):
+        captured = {}
+
+        async def t():
+            up_server = self._upstream_capture(captured)
+            await up_server.start_server()
+            try:
+                app = create_app(_providers(up_server.port), profile, SETTINGS)
+                async with TestClient(TestServer(app)) as c:
+                    r = await c.post("/v1/messages", json=body, headers=headers or {})
+                    assert r.status == 200
+            finally:
+                await up_server.close()
+        run(t())
+        return captured
+
+    def test_deduped_before_upstream(self):
+        captured = self._send(self._profile(odcp=OdcpConfig()), self._body("x" * 500))
+        assert captured["first"] == self.NOTE
+        assert captured["second"] == "x" * 500   # newest survives verbatim
+        from awerouter.logging import tail
+        assert tail(1)[0].odcp_saved > 0
+
+    def test_bypass_header_off(self):
+        captured = self._send(self._profile(odcp=OdcpConfig()), self._body("x" * 500),
+                              headers={"x-awerouter-token-saver": "off"})
+        assert captured["first"] == "x" * 500
+        from awerouter.logging import tail
+        assert tail(1)[0].odcp_saved == 0
+
+    def test_default_off_is_transparent(self):
+        captured = self._send(self._profile(), self._body("x" * 500))
+        assert captured["first"] == "x" * 500
+
+    def test_odcp_runs_before_rtk(self):
+        captured = self._send(self._profile(rtk=True, odcp=OdcpConfig()),
+                              self._body(self.GREP))
+        assert captured["first"] == self.NOTE          # odcp dropped the old output
+        assert "matches in" in captured["second"]      # rtk compressed the kept one
+
+    def test_count_tokens_pruned_consistently(self):
+        captured = {}
+
+        async def t():
+            async def up(request):
+                body = await request.json()
+                results = [b for m in body["messages"] if isinstance(m.get("content"), list)
+                           for b in m["content"] if b.get("type") == "tool_result"]
+                captured["first"] = results[0]["content"]
+                return web.json_response({"token_count": 5})
+
+            up_app = web.Application()
+            up_app.router.add_post("/v1/messages/count_tokens", up)
+            up_server = TestServer(up_app)
+            await up_server.start_server()
+            try:
+                app = create_app(_providers(up_server.port),
+                                 self._profile(odcp=OdcpConfig()), SETTINGS)
+                async with TestClient(TestServer(app)) as c:
+                    r = await c.post("/v1/messages/count_tokens",
+                                     json=self._body("x" * 500))
+                    assert r.status == 200
+            finally:
+                await up_server.close()
+        run(t())
+        assert captured["first"] == self.NOTE
+
+    def test_serve_banner_mentions_odcp(self, capsys):
+        async def t():
+            task = asyncio.ensure_future(
+                _serve("127.0.0.1", 0, _providers(0), self._profile(odcp=OdcpConfig()),
+                       SETTINGS, True))
+            await asyncio.sleep(0.5)
+            task.cancel()
+            await task
+        asyncio.run(t())
+        out = capsys.readouterr().out
+        assert "odcp" in out and "dedup" in out
 
 
 class TestImageBridge:

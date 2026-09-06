@@ -24,7 +24,7 @@
   </p>
 </div>
 
-> 按结构信号把编码 agent 流量拆分到不同 provider，省钱不降质。同协议透传，不做协议转换。可选的 profile 级 tool-result 压缩（RTK，默认关闭）。
+> 按结构信号把编码 agent 流量拆分到不同 provider，省钱不降质。同协议透传，不做协议转换。可选的 profile 级 token 节省（RTK 压缩 + ODCP 裁剪，默认关闭）。
 
 ## 快速开始
 
@@ -627,6 +627,30 @@ L4 是后果检查点，不是难度猜测：代码刚被改写的**下一轮**�
 - 压缩发生在路由之前，`/v1/messages/count_tokens` 同样压缩，因此 L3 决策和用量日志与实际计费一致。开启 RTK 后建议重跑 `usage calibrate`——按未压缩流量校准的阈值会过多地触发 pro（`"auto"` 在窗口期后自愈）。
 
 压缩算法设计源自 [rtk](https://github.com/rtk-ai/rtk)（Apache 2.0）及 [9router](https://github.com/decolua/9router) 的 JS 移植版（MIT），本模块为 Python 从零重构版；请求日志会记录每个请求估算省下的 token。
+
+### ODCP 裁剪（去重 + 清错误）
+
+RTK 压缩每个工具输出的大小；ODCP 删整个不再值那些 token 的内容。对历史做一遍配对遍历，套两条规则：
+
+- **去重（dedup）**——同样的工具、同样的参数调用多次时，只保留最新一次的输出，旧的那次换成一行占位符。重读同一个文件、重跑同一个命令，从 N 份完整输出变成一行。
+- **清错误（purgeErrors）**——失败的工具调用过了 `purgeErrors.turns` 轮用户消息（默认 4）后，其输入字符串换成占位符；错误信息本身保留，模型仍然知道哪里失败过。仅对 anthropic 生效——其他协议在线上不带错误标记。
+
+```json
+"cc-router-1": {
+  "protocol": "anthropic",
+  "longContextThreshold": 8000,
+  "odcp": true,
+  "destinations": { "flash": "stepfun,step-3.7-flash", "pro": "anthropic,claude-opus-5" }
+}
+```
+
+`"odcp": true` 两条规则全开、用默认值；对象写法可细调——`"odcp": {"dedup": false, "purgeErrors": {"turns": 2}}`。护栏：
+
+- 编辑类工具（Edit/Write/apply_patch/…）和 task/规划类工具绝不改写；替换后不会变小的跳过；最后一轮永远不动（去重留最新，清错误要求足够老）。
+- 与 RTK 相同的 fail-open 契约和 `X-Awerouter-Token-Saver: off` 逃生口。ODCP 在 RTK **之前**运行：被删的内容不会到压缩器手里，剩下的照常压缩。
+- 与 RTK 不同，裁剪在设计上不做跨轮的 prompt-cache 前缀稳定：新重复出现时会改写更早的消息（原文本变占位符），错误到达年龄阈值时会改写一次。每次事件用一次性 cache miss 换省下的 token，这正是这个功能存在的取舍。
+
+行为参考 [Opencode-DCP](https://github.com/Opencode-DCP/opencode-dynamic-context-pruning) 的公开文档（AGPL-3.0）；本模块是面向 awerouter 三种协议的独立实现，非其源码翻译。节省量按请求记录（`odcp_saved`），`awerouter usage` 与 rtk 并列展示。
 
 ## 后台运行与热加载
 

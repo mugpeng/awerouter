@@ -91,6 +91,20 @@ class Settings:
 
 
 @dataclass
+class OdcpConfig:
+    """odcp profile flag, normalized (routing.json: "odcp": true | {...}).
+
+    Cross-message context pruning beside rtk's per-text compression: dedup
+    keeps only the newest output of repeated identical tool calls; purgeErrors
+    strips a failed call's input strings once it is `purge_turns` user
+    messages old (the error text stays). The trailing turn is never touched.
+    """
+    dedup: bool = True
+    purge_errors: bool = True
+    purge_turns: int = 4
+
+
+@dataclass
 class RoutingProfile:
     name: str                       # profile id, e.g. "cc-router-1"
     # Maps to providers.json groups: anthropic / openai-chat / openai-responses.
@@ -103,6 +117,7 @@ class RoutingProfile:
     port: Optional[int] = None      # fixed listen port; --port overrides, else default 20128
     threshold_auto: bool = False    # longContextThreshold was "auto"; resolved at serve start
     rtk: bool = False               # compress tool_result content before routing (opt-in)
+    odcp: "OdcpConfig | None" = None  # dedup + errored-call input purge before routing (None = off)
     # Effective settings = global settings merged with this profile's overrides
     # (what serve and the router use); the raw override keys below are
     # display-only — settings keys configured directly in the profile body.
@@ -188,5 +203,6 @@ class RequestLog:
     tokens: dict = field(default_factory=dict)  # per-type input-token breakdown; sum == token_count (pre-breakdown logs: empty)
     file_search_tokens: int = 0                  # estimated tokens of file-search tool results (0 = none / legacy log)
     rtk_saved: int = 0                           # estimated input tokens saved by rtk compression (0 = off / none / legacy log)
+    odcp_saved: int = 0                          # estimated input tokens saved by odcp pruning (0 = off / none / legacy log)
     codex_retried: bool = False                  # an upstream 401 triggered a subscription-login retry (codex re-read / claude refresh; False = no / legacy log)
     fallback_hops: int = 0                       # failover hops taken before the response (0 = primary / legacy log)
