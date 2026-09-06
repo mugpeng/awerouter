@@ -605,11 +605,11 @@ L4 是后果检查点，不是难度猜测：代码刚被改写的**下一轮**�
 
 `imageBridge` 和其他 settings 键一样，也可以只写在某个 profile 体内——当只有个别 profile 拥有多模态 `imageModel` 时就应该这么用（全局开启会让每个 profile 都用自己的 `imageModel` 去转写：纯文本的 imageModel 每次转写都会失败再回退，白白多付一次上游调用）。每张不同的图片多付一次 flash 调用（转写输出上限 2048 token）；第一个桥接轮承担延迟，之后命中缓存。serve 横幅会打印 `image bridge -> on (...)`，注明负责转写的 destination。
 
-## Token Saver（RTK 省流）
+## Token Saver（RTK + ODCP 省流）
 
-> **⚠️ 试验性功能——所以默认关闭。** 压缩是有损的：超长文件读取只保留头尾 + 函数签名等骨架行（截断标记会注明 offset,模型可据此重读中段）;grep 每文件最多保留 10 条命中;diff 有行数上限。格式识别是启发式的，偶尔会在特殊内容上误判造成信息损失——模型通常会察觉并重读，代价是多一轮。如果发现 agent 行为异常(反复重读同一批文件、漏掉细节),关掉 RTK 或对该会话发送 `X-Awerouter-Token-Saver: off`。实际省了多少可用 `awerouter usage log` 查看。
+> **⚠️ 试验性功能——所以默认关闭。** 两层都是有损的。RTK 压缩：超长文件读取只保留头尾 + 函数签名等骨架行（截断标记会注明 offset，模型可据此重读中段）；grep 每文件最多保留 10 条命中；diff 有行数上限；格式识别是启发式的，偶尔会在特殊内容上误判。ODCP 裁剪则是整段删除：被去重的旧输出直接消失，不是截断。模型通常会察觉并重读，代价是多一轮。如果发现 agent 行为异常（反复重读同一批文件、漏掉细节），关掉对应层，或对该会话发送 `X-Awerouter-Token-Saver: off`。实际省了多少可用 `awerouter usage log` 查看。
 
-编码 agent 每轮都重发全部对话历史，其中大头是工具输出——git diff、grep 命中、目录列表、构建日志。profile 可以开启 RTK 压缩，在路由和转发之前原位改写这些文本：
+编码 agent 每轮都重发全部对话历史，其中大头是工具输出——git diff、grep 命中、目录列表、构建日志。profile 可以开启两个互补的省流层，都在路由和转发之前生效：**RTK** 原位压缩每个工具输出的文本，**ODCP** 整段删掉被取代的内容（[RTK](#rtk-压缩)、[ODCP](#odcp-裁剪去重--清错误)）：
 
 ```json
 "cc-router-1": {
@@ -619,6 +619,8 @@ L4 是后果检查点，不是难度猜测：代码刚被改写的**下一轮**�
   "destinations": { "flash": "stepfun,step-3.7-flash", "pro": "anthropic,claude-opus-5" }
 }
 ```
+
+### RTK 压缩
 
 - **只动 tool result：** 仅压缩 `tool_result` / tool 消息内容，绝不碰用户 prompt 和模型回复。规则式 filter（git diff/status/log、grep、find、tree、ls、构建输出等）自动识别格式并压缩；无法识别的内容、500 字符以下的短输出、错误结果（`is_error`）原样放行。
 - **fail-open：** 任何失败（异常、filter 报错）都保持 body 原样，绝不会弄坏请求。注意这只防崩溃，不防启发式误判（见上面的警告）。

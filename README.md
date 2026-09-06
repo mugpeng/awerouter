@@ -605,11 +605,11 @@ The canonical combination is the step-glm-mm template: **glm-5.3 on the GLM codi
 
 `imageBridge` is a settings key like any other, so it can also live in a single profile's body — the right place when only that profile has a multimodal `imageModel` (a global switch makes every profile transcribe via its own `imageModel`; a text-only one fails every caption call and falls back, one wasted upstream call per attempt). Each distinct image costs one extra flash call (caption capped at 2048 output tokens); the first bridged turn pays its latency, later ones hit the cache. The serve banner prints `image bridge -> on (...)` naming the transcribing destination.
 
-## Token Saver (RTK)
+## Token Saver (RTK + ODCP)
 
-> **⚠️ Experimental — that's why it's off by default.** Compression is lossy: long file reads keep head + tail plus a skeleton of signature lines (the marker names the offset to re-read the middle), grep keeps 10 matches per file, diffs are line-capped. Format detection is heuristic and can misfire on unusual content, which loses information — the model usually notices and re-reads, costing an extra turn. If an agent starts behaving oddly (re-reading the same files, missing detail), turn RTK off or send `X-Awerouter-Token-Saver: off` for that session. Check real savings with `awerouter usage log`.
+> **⚠️ Experimental — that's why it's off by default.** Both layers are lossy. RTK compression: long file reads keep head + tail plus a skeleton of signature lines (the marker names the offset to re-read the middle), grep keeps 10 matches per file, diffs are line-capped; format detection is heuristic and can misfire on unusual content. ODCP pruning removes content outright: a deduplicated older output is gone, not truncated. The model usually notices and re-reads, costing an extra turn. If an agent starts behaving oddly (re-reading the same files, missing detail), turn the layer off or send `X-Awerouter-Token-Saver: off` for that session. Check real savings with `awerouter usage log`.
 
-Coding agents resubmit the whole conversation every turn, and most of it is tool output — git diffs, grep hits, directory listings, build logs. A profile can opt into RTK compression, which rewrites that text in place before routing and forwarding:
+Coding agents resubmit the whole conversation every turn, and most of it is tool output — git diffs, grep hits, directory listings, build logs. A profile can opt into two complementary token savers, applied before routing and forwarding: **RTK** rewrites each tool output's text in place, and **ODCP** drops whole superseded content ([RTK](#rtk-compression), [ODCP](#odcp-pruning-dedup--purgeerrors)):
 
 ```json
 "cc-router-1": {
@@ -619,6 +619,8 @@ Coding agents resubmit the whole conversation every turn, and most of it is tool
   "destinations": { "flash": "stepfun,step-3.7-flash", "pro": "anthropic,claude-opus-5" }
 }
 ```
+
+### RTK compression
 
 - **What it touches:** `tool_result` / tool-message content only — never user prompts or model replies. Rule-based filters (git diff/status/log, grep, find, tree, ls, build output, …) auto-detect the format and compress it; unrecognized content, anything under 500 chars, and error results (`is_error`) pass through untouched.
 - **Fail-open:** any failure (exception, filter error) leaves the body as-is — never a broken request. Note this guards against crashes, not heuristic misjudgment (see the warning above).
