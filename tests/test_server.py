@@ -27,7 +27,7 @@ from awerouter.server import (
     _serve,
     create_app,
 )
-from awerouter.types import Destination, OdcpConfig, Provider, RoutingProfile, Settings
+from awerouter.types import AwecompressConfig, Destination, OdcpConfig, Provider, RoutingProfile, Settings
 
 
 ROUTING = RoutingProfile(
@@ -2344,3 +2344,117 @@ class TestPoolModelsWarning:
             "openai-chat": {"b": Provider("b", "http://x", "k", models=("m2",), pool="p")},
         }
         assert _pool_models_warning(groups) is None
+
+
+# ---------------------------------------------------------------------------
+# awecompress in-process integration
+# ---------------------------------------------------------------------------
+
+class TestAwecompressPipeline:
+    def _profile(self):
+        return RoutingProfile(
+            name="awc-test", protocols="anthropic", long_context_threshold=10**9,
+            destinations={"flash": Destination("stepfun", "step-3.5-flash"),
+                          "pro": Destination("anthropic", "claude-opus-5")},
+            awecompress=AwecompressConfig(threshold_tokens=500, keep_recent_turns=2,
+                                          min_span_tokens=100),
+        )
+
+    def _history(self, turns=6):
+        messages = []
+        for i in range(turns):
+            messages.append({"role": "user", "content": f"turn {i} " + "x" * 1200})
+            messages.append({"role": "assistant", "content": f"reply {i} " + "x" * 1200})
+        return messages
+
+    def _run(self, coroutine):
+        run(coroutine)
+
+    def test_compresses_routes_summary_to_flash_and_freezes(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AWECOMPRESS_CONFIG_DIR", str(tmp_path))
+
+        async def t():
+            bodies = []
+
+            async def up(request):
+                body = await request.json()
+                bodies.append(body)
+                sys = body.get("system")
+                if isinstance(sys, str) and sys.startswith("You compress"):
+                    # the summary side-call: answer with summary text
+                    return web.json_response({"content": [
+                        {"type": "text", "text": "FROZEN SUMMARY"}]})
+                return web.json_response({"content": [
+                    {"type": "text", "text": "ok"}]})
+
+            up_app = web.Application()
+            up_app.router.add_post("/v1/messages", up)
+            up_server = TestServer(up_app)
+            await up_server.start_server()
+            try:
+                app = create_app(_providers(up_server.port), self._profile(), SETTINGS)
+                async with TestClient(TestServer(app)) as c:
+                    payload = {"model": "flash", "system": "s",
+                               "messages": self._history(), "stream": False}
+                    r = await c.post("/v1/messages", json=payload)
+                    assert r.status == 200
+
+                    summary_calls = [b for b in bodies
+                                     if isinstance(b.get("system"), str)
+                                     and b["system"].startswith("You compress")]
+                    assert len(summary_calls) == 1
+                    assert summary_calls[0]["model"] == "step-3.5-flash"  # flash destination
+
+                    forwarded = bodies[-1]
+                    assert "FROZEN SUMMARY" in forwarded["messages"][0]["content"][0]["text"]
+                    assert len(forwarded["messages"]) < len(payload["messages"])
+
+                    # frozen: an identical resend reuses the summary, no new call
+                    before = len(bodies)
+                    await c.post("/v1/messages", json=payload)
+                    assert len(bodies) == before + 1  # one forwarded request, no summary call
+                    assert bodies[-1] == forwarded    # byte-identical body
+
+                    from awerouter.logging import tail
+                    saved = [e.awecompress_saved for e in tail(None) if e.awecompress_saved]
+                    assert saved  # usage log carries the savings
+            finally:
+                await up_server.close()
+        self._run(t())
+
+    def test_token_saver_off_bypasses_awecompress(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AWECOMPRESS_CONFIG_DIR", str(tmp_path))
+
+        async def t():
+            bodies = []
+
+            async def up(request):
+                bodies.append(await request.json())
+                return web.json_response({"content": [
+                    {"type": "text", "text": "ok"}]})
+
+            up_app = web.Application()
+            up_app.router.add_post("/v1/messages", up)
+            up_server = TestServer(up_app)
+            await up_server.start_server()
+            try:
+                app = create_app(_providers(up_server.port), self._profile(), SETTINGS)
+                async with TestClient(TestServer(app)) as c:
+                    payload = {"model": "flash", "system": "s",
+                               "messages": self._history(), "stream": False}
+                    r = await c.post("/v1/messages", json=payload,
+                                     headers={"x-awerouter-token-saver": "off"})
+                    assert r.status == 200
+                    assert bodies[-1]["messages"] == payload["messages"]  # untouched
+            finally:
+                await up_server.close()
+        self._run(t())
+
+    def test_literal_summary_model_validated_at_create(self):
+        profile = RoutingProfile(
+            name="bad", protocols="anthropic", long_context_threshold=8000,
+            destinations={"flash": Destination("stepfun", "m"),
+                          "pro": Destination("anthropic", "m")},
+            awecompress=AwecompressConfig(summary_model="no-such-model"))
+        with pytest.raises(SystemExit, match="no-such-model"):
+            create_app(_providers(0), profile, SETTINGS)

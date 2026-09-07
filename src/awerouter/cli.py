@@ -684,7 +684,7 @@ def _settings_or_default(profile_name=None):
 
 def _usage_header(since, profile_name):
     """Print search-discount context for the filtered window."""
-    from awerouter.logging import odcp_totals, rtk_totals, tail as _tail
+    from awerouter.logging import awecompress_totals, odcp_totals, rtk_totals, tail as _tail
     settings = _settings_or_default(profile_name)
     discount = settings.search_result_discount if settings else 0.3
     cutoff = _parse_since(since) if since else None
@@ -706,6 +706,10 @@ def _usage_header(since, profile_name):
     if odcp["saved"]:
         click.echo(f"odcp: saved {odcp['saved']:,} input tokens "
                    f"({odcp['requests']}/{len(entries)} requests pruned)")
+    awc = awecompress_totals(cutoff, profile_name)
+    if awc["saved"]:
+        click.echo(f"awecompress: saved {awc['saved']:,} input tokens "
+                   f"({awc['requests']}/{len(entries)} requests compressed)")
 
 
 def _usage_log(n, since=None, profile_name=None, tokens_mode=False):
@@ -1008,7 +1012,7 @@ def savings(since, profile_name):
 
 
 def _usage_savings(since, profile_name):
-    from awerouter.logging import cadence, odcp_totals, rtk_totals, token_totals
+    from awerouter.logging import awecompress_totals, cadence, odcp_totals, rtk_totals, token_totals
     cutoff = _window_cutoff(since, profile_name)
     t = token_totals(cutoff, profile_name)
     if not t:
@@ -1039,6 +1043,11 @@ def _usage_savings(since, profile_name):
         click.echo()
         click.echo("odcp pruning (superseded tool-call content dropped, stacks with the above):")
         click.echo(f"  saved {odcp['saved']:,} input tokens across {odcp['requests']} requests")
+    awc = awecompress_totals(cutoff, profile_name)
+    if awc["saved"]:
+        click.echo()
+        click.echo("awecompress (oldest turns folded into frozen summaries, stacks with the above):")
+        click.echo(f"  saved {awc['saved']:,} input tokens across {awc['requests']} requests")
     click.echo()
     click.echo("vs a pro-only setup:")
     click.echo(f"  pro input billed   {total_tok:,} → {pro['tokens']:,}")

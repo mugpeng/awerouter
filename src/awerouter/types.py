@@ -105,6 +105,25 @@ class OdcpConfig:
 
 
 @dataclass
+class AwecompressConfig:
+    """awecompress profile flag, normalized (routing.json: "awecompress": true | {...}).
+
+    Frozen-summary compression of the oldest history turns — the awecompress
+    package's core running in-process, ahead of odcp/rtk in this pipeline.
+    summary_model: "" or "flash" sends summary calls to the flash destination,
+    "pro" to pro; a literal model id must be declared by a provider in every
+    protocol group the profile serves (validated at serve start).
+    """
+    summary_model: str = ""
+    threshold_tokens: int = 60000
+    keep_recent_turns: int = 4
+    min_span_tokens: int = 8000
+    transcript_result_cap: int = 4000
+    protected_tools: tuple = ("task", "skill", "todowrite", "todoread", "updateplan")
+    protected_file_patterns: tuple = ()
+
+
+@dataclass
 class RoutingProfile:
     name: str                       # profile id, e.g. "cc-router-1"
     # Maps to providers.json groups: anthropic / openai-chat / openai-responses.
@@ -118,6 +137,7 @@ class RoutingProfile:
     threshold_auto: bool = False    # longContextThreshold was "auto"; resolved at serve start
     rtk: bool = False               # compress tool_result content before routing (opt-in)
     odcp: "OdcpConfig | None" = None  # dedup + errored-call input purge before routing (None = off)
+    awecompress: "AwecompressConfig | None" = None  # frozen-summary history compression (None = off)
     # Effective settings = global settings merged with this profile's overrides
     # (what serve and the router use); the raw override keys below are
     # display-only — settings keys configured directly in the profile body.
@@ -204,5 +224,6 @@ class RequestLog:
     file_search_tokens: int = 0                  # estimated tokens of file-search tool results (0 = none / legacy log)
     rtk_saved: int = 0                           # estimated input tokens saved by rtk compression (0 = off / none / legacy log)
     odcp_saved: int = 0                          # estimated input tokens saved by odcp pruning (0 = off / none / legacy log)
+    awecompress_saved: int = 0                   # estimated input tokens saved by awecompress frozen summaries (0 = off / none / legacy log)
     codex_retried: bool = False                  # an upstream 401 triggered a subscription-login retry (codex re-read / claude refresh; False = no / legacy log)
     fallback_hops: int = 0                       # failover hops taken before the response (0 = primary / legacy log)

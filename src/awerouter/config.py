@@ -19,7 +19,7 @@ from awerouter import __version__
 from awerouter.claude import AUTH_SENTINEL as CLAUDE_SENTINEL
 from awerouter.codex import AUTH_SENTINEL
 from awerouter.protocols import PROTOCOL_IDS
-from awerouter.types import AutoThresholdConfig, Destination, OdcpConfig, Provider, RoutingProfile, Settings, ToolRoutingConfig
+from awerouter.types import AutoThresholdConfig, AwecompressConfig, Destination, OdcpConfig, Provider, RoutingProfile, Settings, ToolRoutingConfig
 
 # ---------------------------------------------------------------------------
 # Constants (mirror aweswitch cli.py conventions exactly)
@@ -360,7 +360,7 @@ _SETTINGS_KEYS = frozenset({
 # Keys that belong to the profile body itself (settings keys may join them).
 _PROFILE_KEYS = frozenset({
     "protocol", "longContextThreshold", "destinations", "port", "rtk", "odcp",
-    "backups",
+    "awecompress", "backups",
 })
 
 
@@ -404,6 +404,51 @@ def _parse_odcp(name: str, raw) -> "OdcpConfig | None":
     if isinstance(turns, bool) or not isinstance(turns, int) or turns < 1:
         die(f"profile '{name}': odcp purgeErrors 'turns' must be an integer >= 1, got: {turns!r}")
     return OdcpConfig(dedup=dedup, purge_errors=purge, purge_turns=turns)
+
+
+_AWECOMPRESS_INT_KEYS = {
+    "thresholdTokens": ("threshold_tokens", 1000),
+    "keepRecentTurns": ("keep_recent_turns", 1),
+    "minSpanTokens": ("min_span_tokens", 1000),
+    "transcriptResultCap": ("transcript_result_cap", 100),
+}
+_AWECOMPRESS_LIST_KEYS = ("protectedTools", "protectedFilePatterns")
+
+
+def _parse_awecompress(name: str, raw) -> "AwecompressConfig | None":
+    """'awecompress': true enables frozen-summary compression with defaults;
+    an object tunes it. Absent/false = off, the transparent default (same
+    convention as rtk/odcp)."""
+    if raw is False or raw is None:
+        return None
+    if raw is True:
+        return AwecompressConfig()
+    if not isinstance(raw, dict):
+        die(f"profile '{name}': 'awecompress' must be true, false, or an object, got: {raw!r}")
+    known = set(_AWECOMPRESS_INT_KEYS) | set(_AWECOMPRESS_LIST_KEYS) | {"summaryModel"}
+    unknown = set(raw) - known
+    if unknown:
+        die(f"profile '{name}': unknown awecompress key(s): {', '.join(sorted(unknown))}; "
+            f"expected any of: {', '.join(sorted(known))}")
+    cfg = AwecompressConfig()
+    for key, value in raw.items():
+        if key == "summaryModel":
+            if not isinstance(value, str):
+                die(f"profile '{name}': awecompress 'summaryModel' must be a string, "
+                    f"got: {value!r}")
+            cfg.summary_model = value
+        elif key in _AWECOMPRESS_INT_KEYS:
+            field, minimum = _AWECOMPRESS_INT_KEYS[key]
+            if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
+                die(f"profile '{name}': awecompress '{key}' must be an integer "
+                    f">= {minimum}, got: {value!r}")
+            setattr(cfg, field, value)
+        else:  # list key
+            if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
+                die(f"profile '{name}': awecompress '{key}' must be an array of strings")
+            setattr(cfg, "protected_tools" if key == "protectedTools"
+                    else "protected_file_patterns", tuple(value))
+    return cfg
 
 
 def _parse_settings(raw: dict, base: Settings | None = None,
@@ -511,6 +556,7 @@ def load_routing(path: Optional[Path] = None) -> tuple[Settings, dict[str, Routi
         if not isinstance(rtk_raw, bool):
             die(f"profile '{name}': 'rtk' must be true or false, got: {rtk_raw!r}")
         odcp = _parse_odcp(name, body.get("odcp", False))
+        awecompress_cfg = _parse_awecompress(name, body.get("awecompress", False))
         # Per-profile settings override the global block key by key (nested
         # blocks field by field); keys absent from the body inherit everything.
         raw_psettings = {k: v for k, v in body.items() if k in _SETTINGS_KEYS}
@@ -559,6 +605,7 @@ def load_routing(path: Optional[Path] = None) -> tuple[Settings, dict[str, Routi
             threshold_auto=threshold_auto,
             rtk=rtk_raw,
             odcp=odcp,
+            awecompress=awecompress_cfg,
             settings=psettings,
             settings_overrides=raw_psettings,
             backups=backups,
@@ -848,6 +895,15 @@ def format_routing_display(settings: Settings, profiles: dict[str, RoutingProfil
             entry["odcp"] = {
                 "dedup": p.odcp.dedup,
                 "purgeErrors": {"turns": p.odcp.purge_turns} if p.odcp.purge_errors else False,
+            }
+        if p.awecompress is not None:
+            entry["awecompress"] = {
+                "summaryModel": p.awecompress.summary_model,
+                "thresholdTokens": p.awecompress.threshold_tokens,
+                "keepRecentTurns": p.awecompress.keep_recent_turns,
+                "minSpanTokens": p.awecompress.min_span_tokens,
+                "protectedTools": list(p.awecompress.protected_tools),
+                "protectedFilePatterns": list(p.awecompress.protected_file_patterns),
             }
         # mirrors the config shape: overridden settings keys sit flat in the
         # profile body, next to protocol/destinations

@@ -22,7 +22,7 @@ from awerouter.config import (
     save_provider,
     validate_profiles,
 )
-from awerouter.types import Destination, OdcpConfig, Provider, RoutingProfile, Settings, ToolRoutingConfig
+from awerouter.types import AwecompressConfig, Destination, OdcpConfig, Provider, RoutingProfile, Settings, ToolRoutingConfig
 
 
 # ---------------------------------------------------------------------------
@@ -1580,3 +1580,75 @@ class TestPoolFlag:
             self._providers(tmp_path, monkeypatch,
                             {"base_url": "https://api.stepfun.com", "auth": "${K}",
                              "pool": "   "})
+
+
+# ---------------------------------------------------------------------------
+# awecompress profile flag
+# ---------------------------------------------------------------------------
+
+class TestAwecompressFlag:
+    _BASE = {"protocol": "anthropic", "longContextThreshold": 1,
+             "destinations": {"flash": "p,m", "pro": "p,m"}}
+
+    def test_default_off(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+        _write_config(tmp_path, {}, {"cc-1": self._BASE})
+        _, profiles = load_routing()
+        assert profiles["cc-1"].awecompress is None
+
+    def test_true_yields_defaults(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+        _write_config(tmp_path, {}, {"cc-1": {**self._BASE, "awecompress": True}})
+        _, profiles = load_routing()
+        assert profiles["cc-1"].awecompress == AwecompressConfig()
+
+    def test_object_form_parsed(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+        _write_config(tmp_path, {}, {"cc-1": {**self._BASE, "awecompress": {
+            "summaryModel": "pro", "thresholdTokens": 30000,
+            "protectedTools": ["task"], "protectedFilePatterns": ["**/*.sql"]}}})
+        _, profiles = load_routing()
+        assert profiles["cc-1"].awecompress == AwecompressConfig(
+            summary_model="pro", threshold_tokens=30000,
+            protected_tools=("task",), protected_file_patterns=("**/*.sql",))
+
+    @pytest.mark.parametrize("bad", ["yes", 1])
+    def test_non_bool_non_object_dies(self, tmp_path, monkeypatch, bad):
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+        _write_config(tmp_path, {}, {"cc-1": {**self._BASE, "awecompress": bad}})
+        with pytest.raises(SystemExit, match="'awecompress'"):
+            load_routing()
+
+    def test_unknown_key_dies(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+        _write_config(tmp_path, {}, {"cc-1": {**self._BASE,
+                                              "awecompress": {"thresholdTokens": 1, "nope": 2}}})
+        with pytest.raises(SystemExit, match="unknown awecompress key"):
+            load_routing()
+
+    def test_bad_int_dies(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+        _write_config(tmp_path, {}, {"cc-1": {**self._BASE,
+                                              "awecompress": {"keepRecentTurns": 0}}})
+        with pytest.raises(SystemExit, match="'keepRecentTurns'"):
+            load_routing()
+
+    def test_bad_list_dies(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+        _write_config(tmp_path, {}, {"cc-1": {**self._BASE,
+                                              "awecompress": {"protectedTools": "task"}}})
+        with pytest.raises(SystemExit, match="'protectedTools'"):
+            load_routing()
+
+    def test_display_round_trips_when_set(self):
+        settings = Settings()
+        profiles = {
+            "off": RoutingProfile("off", "anthropic", 8000, {
+                "flash": Destination("p", "m1"), "pro": Destination("p", "m2")}),
+            "on": RoutingProfile("on", "anthropic", 8000, {
+                "flash": Destination("p", "m1"), "pro": Destination("p", "m2")},
+                awecompress=AwecompressConfig(summary_model="pro")),
+        }
+        data = json.loads(format_routing_display(settings, profiles))
+        assert "awecompress" not in data["off"]
+        assert data["on"]["awecompress"]["summaryModel"] == "pro"

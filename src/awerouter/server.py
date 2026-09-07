@@ -55,6 +55,15 @@ from awerouter.types import (
     Settings,
 )
 from awerouter.update_check import cached_update_hint
+
+# awecompress (frozen-summary history compression) runs in-process beside
+# odcp/rtk when a profile opts in. Soft import: the flag dies at serve start
+# with an install hint when the package is absent — awerouter works without it.
+try:
+    from awecompress.integrate import Compressor, Knobs
+except ImportError:  # pragma: no cover — only reachable without the package
+    Compressor = None
+    Knobs = None
 from awerouter.vision import (
     CAPTIONS,
     build_caption_body,
@@ -82,6 +91,10 @@ def _rtk_enabled(request: web.Request, profile) -> bool:
 
 def _odcp_enabled(request: web.Request, profile) -> bool:
     return profile.odcp is not None and _token_saver_on(request)
+
+
+def _awecompress_enabled(request: web.Request, profile) -> bool:
+    return profile.awecompress is not None and _token_saver_on(request)
 
 
 # ---------------------------------------------------------------------------
@@ -369,7 +382,8 @@ class _RoutingState:
     """Mutable routing state shared across the retry loop."""
 
     def __init__(self, profile, settings, body: dict, agent: str = "", rtk_saved: int = 0,
-                 odcp_saved: int = 0, protocol: str = "", resolve_model: "str | None" = None,
+                 odcp_saved: int = 0, awecompress_saved: int = 0, protocol: str = "",
+                 resolve_model: "str | None" = None,
                  direct_dest: Destination | None = None, providers: dict | None = None):
         self.profile = profile
         self.body = body
@@ -377,6 +391,7 @@ class _RoutingState:
         self.agent = agent
         self.rtk_saved = rtk_saved
         self.odcp_saved = odcp_saved
+        self.awecompress_saved = awecompress_saved
         self.protocol = protocol
         self.direct_dest = direct_dest
         if direct_dest is None:
@@ -444,6 +459,7 @@ def _log_failure(state: _RoutingState, request_id: str, t0: float, status: int) 
         file_search_tokens=state.result.inspect.file_search_tokens,
         rtk_saved=state.rtk_saved,
         odcp_saved=state.odcp_saved,
+        awecompress_saved=state.awecompress_saved,
         profile=state.log_profile,
         protocol=state.protocol,
         agent=state.agent,
@@ -579,6 +595,125 @@ def _gateway_select(app, model: "str | None", endpoint_protocol: str) -> tuple[_
     return entry, model or ""
 
 
+# ---------------------------------------------------------------------------
+# awecompress (frozen-summary history compression, in-process)
+# ---------------------------------------------------------------------------
+
+# Generous: a summary call carries a transcript and waits on a full
+# non-streaming completion.
+AWECOMPRESS_SUMMARY_TIMEOUT = aiohttp.ClientTimeout(connect=10, total=120)
+
+
+def _awecompress_validate(profile, providers_all: dict) -> None:
+    """Serve-start cross-check: the package must be importable and a literal
+    summaryModel must be servable in every protocol group the profile speaks.
+    Tier names ("", "flash", "pro") ride the destinations and need no check."""
+    if profile.awecompress is None:
+        return
+    if Compressor is None:
+        raise SystemExit(
+            f"awerouter: profile '{profile.name}' has 'awecompress' on but the "
+            "awecompress package is not installed — run: pip install awecompress")
+    sm = profile.awecompress.summary_model
+    if sm in ("", "flash", "pro"):
+        return
+    for protocol in profile.protocols:
+        group = providers_all.get(protocol) or {}
+        for provider in group.values():
+            if sm in provider.models:
+                break
+        else:
+            declared = sorted({m for p in group.values() for m in p.models})
+            raise SystemExit(
+                f"awerouter: profile '{profile.name}' awecompress summaryModel "
+                f"'{sm}' is not declared by any {protocol} provider; declared: "
+                f"{', '.join(declared) or '(none)'}")
+
+
+def _awecompress_compressor(app) -> "Compressor":
+    """One Compressor per app, sharing the standalone proxy's default store
+    (~/.config/awecompress/summaries.db — session keys are hashes, so both
+    hosts' sessions coexist; `awecompress status/clear` manage it)."""
+    comp = app.get("awecompress")
+    if comp is None:
+        from awecompress.config import db_path
+        comp = Compressor(str(db_path()))
+        app["awecompress"] = comp
+    return comp
+
+
+def _awecompress_summary_destination(profile, providers: dict):
+    """Who serves summary calls: the flash destination by default, pro on
+    request, or the provider declaring a literal model id."""
+    sm = profile.awecompress.summary_model
+    if sm == "pro":
+        return profile.destinations["pro"]
+    if sm not in ("", "flash"):
+        for pname, provider in providers.items():
+            if sm in provider.models:
+                return Destination(pname, sm)
+        # Unreachable after serve-start validation; a hot-reload that broke
+        # the declaration falls back to the safe default rather than dying
+        # mid-request (fail-open, like the rest of this path).
+        print(f"[awecompress] summaryModel '{sm}' no longer declared; "
+              f"summaries fall back to the flash destination")
+    return profile.destinations["flash"]
+
+
+async def _awecompress_apply(app, session, body: dict, protocol: str,
+                             profile, providers: dict,
+                             allow_summary: bool = True) -> int:
+    """One Compressor.transform() call in the request path. Mutates the body
+    in place on compression; returns the estimated saved tokens (0 = nothing
+    done). Fail-open: any error leaves the body as-is."""
+    try:
+        comp = _awecompress_compressor(app)
+        c = profile.awecompress
+        knobs = Knobs(
+            threshold_tokens=c.threshold_tokens,
+            keep_recent_turns=c.keep_recent_turns,
+            min_span_tokens=c.min_span_tokens,
+            transcript_result_cap=c.transcript_result_cap,
+            protected_tools=c.protected_tools,
+            protected_file_patterns=c.protected_file_patterns,
+        )
+        dest = model = None
+
+        async def sender(request_body: dict) -> dict:
+            # _proxy_request handles the provider's auth (subscription logins
+            # included), the model rewrite, codex quirks, and the shell proxy.
+            up = await _proxy_request(session, request_body, dest, providers,
+                                      {"content-type": "application/json"},
+                                      ENDPOINT_PATHS[protocol],
+                                      AWECOMPRESS_SUMMARY_TIMEOUT)
+            try:
+                if up.status != 200:
+                    detail = (await up.text())[:200]
+                    raise RuntimeError(f"summary upstream {up.status}: {detail}")
+                if (up.headers.get("content-type") or "").startswith("text/event-stream"):
+                    raw = await up.read()  # codex backend: SSE even when asked not to
+                    obj = _codex_sse_response(raw)
+                    if obj is None:
+                        raise RuntimeError("summary stream ended without a completed response")
+                    return obj
+                return await up.json(content_type=None)
+            finally:
+                up.close()
+
+        if allow_summary:
+            dest = _awecompress_summary_destination(profile, providers)
+            model = dest.model
+        outcome = await comp.transform(body, protocol, model, sender if allow_summary else None, knobs)
+        if outcome is None:
+            return 0
+        if allow_summary:
+            print(outcome.line)
+        return outcome.saved_tokens
+    except Exception as exc:  # noqa: BLE001 — fail-open is the contract
+        print(f"[awecompress] apply error: {exc}")
+        return 0
+
+
 async def _proxy_flow(request: web.Request, endpoint_protocol: str) -> web.StreamResponse:
     """Generic same-protocol proxy flow: route, forward, retry, stream back, log."""
     session: aiohttp.ClientSession = request.app["session"]
@@ -621,6 +756,18 @@ async def _proxy_flow(request: web.Request, endpoint_protocol: str) -> web.Strea
         await _bridge_images(request_id, session, body, endpoint_protocol,
                              profile, providers, settings)
 
+    # awecompress before odcp/rtk: the oldest turns become one frozen summary
+    # first (one summary call to the resolved destination when the covered
+    # span grows — routed, not label-guessed, so a big transcript can never
+    # be mispriced to pro by L3); odcp then prunes what remains and rtk
+    # shrinks it. All three run before routing: L3 decisions, effective_tokens,
+    # and the usage log reflect what is actually sent (and billed) upstream.
+    # Runs once — retries and the flash→pro fallback reuse the same body.
+    awecompress_saved = 0
+    if _awecompress_enabled(request, profile) and direct_dest is None:
+        awecompress_saved = await _awecompress_apply(
+            request.app, session, body, endpoint_protocol, profile, providers)
+
     # odcp pruning before rtk: whole superseded outputs become one-line
     # placeholders first, then rtk compresses the size of what remains. Both
     # run before routing: L3 decisions, effective_tokens, and the usage log
@@ -644,7 +791,7 @@ async def _proxy_flow(request: web.Request, endpoint_protocol: str) -> web.Strea
 
     state = _RoutingState(profile, settings, body,
                           _agent_from_ua(request.headers.get("User-Agent", "")),
-                          rtk_saved, odcp_saved, endpoint_protocol, resolve_model,
+                          rtk_saved, odcp_saved, awecompress_saved, endpoint_protocol, resolve_model,
                           direct_dest, providers)
 
     while True:
@@ -770,6 +917,7 @@ async def _proxy_flow(request: web.Request, endpoint_protocol: str) -> web.Strea
                 file_search_tokens=state.result.inspect.file_search_tokens,
                 rtk_saved=state.rtk_saved,
                 odcp_saved=state.odcp_saved,
+                awecompress_saved=state.awecompress_saved,
                 profile=state.log_profile,
                 protocol=state.protocol,
                 agent=state.agent,
@@ -833,6 +981,7 @@ async def _proxy_flow(request: web.Request, endpoint_protocol: str) -> web.Strea
             file_search_tokens=state.result.inspect.file_search_tokens,
             rtk_saved=state.rtk_saved,
             odcp_saved=state.odcp_saved,
+            awecompress_saved=state.awecompress_saved,
             profile=state.log_profile,
             protocol=state.protocol,
             agent=state.agent,
@@ -942,6 +1091,11 @@ async def handle_count_tokens(request: web.Request) -> web.Response:
 
     # Same pruning and compression as /v1/messages: the client's
     # context-window estimate must match what actually gets sent upstream.
+    # awecompress applies existing summaries but never mints one here — no
+    # surprise LLM calls off a token count.
+    if _awecompress_enabled(request, profile) and direct_dest is None:
+        await _awecompress_apply(request.app, session, body, "anthropic",
+                                 profile, providers, allow_summary=False)
     if _odcp_enabled(request, profile) and direct_dest is None:
         odcp.prune_body(body, "anthropic", profile.odcp)
     if _rtk_enabled(request, profile) and direct_dest is None:
@@ -1087,6 +1241,7 @@ async def _daemon_guard(request: web.Request, handler) -> web.StreamResponse:
 def create_app(providers: dict, profile, settings) -> web.Application:
     """providers is the profile's groups keyed by served protocol
     ({protocol: {provider_name: Provider}}); each handler picks its own group."""
+    _awecompress_validate(profile, providers)
     app = web.Application(middlewares=[_daemon_guard])
     app["providers"] = providers
     app["profile"] = profile
@@ -1132,6 +1287,8 @@ def create_gateway_app(entries: dict[str, _GatewayEntry],
             for entry in entries.values():
                 if protocol in entry.profile.protocols:
                     entry.providers[protocol] = group
+    for entry in entries.values():
+        _awecompress_validate(entry.profile, entry.providers)
     app["version"] = __version__
 
     session = aiohttp.ClientSession()
@@ -1184,6 +1341,7 @@ def _reload_config(app, profile_name: str) -> bool:
     """
     try:
         new_providers, new_profile, new_settings = load_for_profile(profile_name)
+        _awecompress_validate(new_profile, new_providers)  # SystemExit → reload skipped below
     except SystemExit as exc:
         print(f"  config reload skipped (serving the previous config): {exc}")
         return False
@@ -1488,6 +1646,9 @@ async def _serve(host: str, port: int, providers: dict, profile, settings,
         print("  rtk           -> on (tool-result compression)")
     if profile.odcp is not None:
         print("  odcp          -> on (dedup + errored-call input purge)")
+    if profile.awecompress is not None:
+        sm = profile.awecompress.summary_model or "flash"
+        print(f"  awecompress   -> on (frozen summaries; summary calls via {sm})")
     if settings.image_bridge:
         bd = profile.destinations[settings.image_model]
         print(f"  image bridge  -> on ({bd.provider_name}/{bd.model} transcribes "
