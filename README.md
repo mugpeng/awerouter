@@ -605,7 +605,29 @@ The canonical combination is the step-glm-mm template: **glm-5.3 on the GLM codi
 
 `imageBridge` is a settings key like any other, so it can also live in a single profile's body — the right place when only that profile has a multimodal `imageModel` (a global switch makes every profile transcribe via its own `imageModel`; a text-only one fails every caption call and falls back, one wasted upstream call per attempt). Each distinct image costs one extra flash call (caption capped at 2048 output tokens); the first bridged turn pays its latency, later ones hit the cache. The serve banner prints `image bridge -> on (...)` naming the transcribing destination.
 
-## Token Saver (RTK + ODCP)
+## Token Saver (RTK + awecompress + ODCP)
+
+> **Context compression with awecompress:** install it with `pip install awerouter[compress]`, then enable `"awecompress": true` in a profile. It freezes old complete turns into a cached summary before ODCP/RTK and forwards the smaller body to the selected destination. An object form accepts `summaryModel` (`"flash"` by default, `"pro"`, or a literal model), `thresholdTokens`, `keepRecentTurns`, `minSpanTokens`, `transcriptResultCap`, `protectedTools`, and `protectedFilePatterns`.
+>
+> Literal `summaryModel` values must be listed in `providers.json` under `models` for every protocol served by the profile. The frozen summaries live in the shared awecompress SQLite store, so standalone awecompress and awerouter can reuse them. Summary failures are fail-open; an existing frozen summary is reused when possible. `count_tokens` only applies an existing summary and never starts a new summary call. `X-Awerouter-Token-Saver: off` disables awecompress, ODCP, and RTK for that request.
+
+```json
+"cc-router-1": {
+  "protocol": "anthropic",
+  "longContextThreshold": 8000,
+  "awecompress": {
+    "summaryModel": "flash",
+    "thresholdTokens": 60000,
+    "keepRecentTurns": 4,
+    "minSpanTokens": 8000,
+    "protectedTools": ["task", "skill", "todowrite"],
+    "protectedFilePatterns": ["**/*.schema.json"]
+  },
+  "destinations": { "flash": "stepfun,step-3.7-flash", "pro": "anthropic,claude-opus-5" }
+}
+```
+
+### RTK and ODCP
 
 > **⚠️ Experimental — that's why it's off by default.** Both layers are lossy. RTK compression: long file reads keep head + tail plus a skeleton of signature lines (the marker names the offset to re-read the middle), grep keeps 10 matches per file, diffs are line-capped; format detection is heuristic and can misfire on unusual content. ODCP pruning removes content outright: a deduplicated older output is gone, not truncated. The model usually notices and re-reads, costing an extra turn. If an agent starts behaving oddly (re-reading the same files, missing detail), turn the layer off or send `X-Awerouter-Token-Saver: off` for that session. Check real savings with `awerouter usage log`.
 

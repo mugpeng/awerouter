@@ -1268,6 +1268,9 @@ def create_app(providers: dict, profile, settings) -> web.Application:
 
     async def on_cleanup(app):
         await app["session"].close()
+        compressor = app.get("awecompress")
+        if compressor is not None:
+            compressor.close()
 
     app.on_cleanup.append(on_cleanup)
     return app
@@ -1308,6 +1311,9 @@ def create_gateway_app(entries: dict[str, _GatewayEntry],
 
     async def on_cleanup(app):
         await app["session"].close()
+        compressor = app.get("awecompress")
+        if compressor is not None:
+            compressor.close()
 
     app.on_cleanup.append(on_cleanup)
     return app

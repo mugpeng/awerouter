@@ -2450,6 +2450,24 @@ class TestAwecompressPipeline:
                 await up_server.close()
         self._run(t())
 
+    def test_compressor_closed_during_app_cleanup(self):
+        class FakeCompressor:
+            def __init__(self):
+                self.closed = 0
+
+            def close(self):
+                self.closed += 1
+
+        async def t():
+            app = create_app(_providers(0), self._profile(), SETTINGS)
+            compressor = FakeCompressor()
+            app["awecompress"] = compressor
+            async with TestClient(TestServer(app)):
+                assert compressor.closed == 0
+            assert compressor.closed == 1
+
+        self._run(t())
+
     def test_literal_summary_model_validated_at_create(self):
         profile = RoutingProfile(
             name="bad", protocols="anthropic", long_context_threshold=8000,

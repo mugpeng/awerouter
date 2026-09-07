@@ -605,7 +605,29 @@ L4 是后果检查点，不是难度猜测：代码刚被改写的**下一轮**�
 
 `imageBridge` 和其他 settings 键一样，也可以只写在某个 profile 体内——当只有个别 profile 拥有多模态 `imageModel` 时就应该这么用（全局开启会让每个 profile 都用自己的 `imageModel` 去转写：纯文本的 imageModel 每次转写都会失败再回退，白白多付一次上游调用）。每张不同的图片多付一次 flash 调用（转写输出上限 2048 token）；第一个桥接轮承担延迟，之后命中缓存。serve 横幅会打印 `image bridge -> on (...)`，注明负责转写的 destination。
 
-## Token Saver（RTK + ODCP 省流）
+## Token Saver（RTK + awecompress + ODCP 省流）
+
+> **awecompress 上下文压缩：** 先执行 `pip install awerouter[compress]`，再在 profile 中开启 `"awecompress": true`。它会在 ODCP/RTK 之前把旧的完整轮次冻结成可缓存摘要，再把更小的请求体发往选定 destination。对象写法支持 `summaryModel`（默认 `"flash"`，也可用 `"pro"` 或字面模型）、`thresholdTokens`、`keepRecentTurns`、`minSpanTokens`、`transcriptResultCap`、`protectedTools`、`protectedFilePatterns`。
+>
+> 字面量 `summaryModel` 必须在 profile 所服务的每个协议组的 `providers.json` `models` 中声明。冻结摘要保存在共享的 awecompress SQLite 存储中，因此独立 awecompress 和 awerouter 可以复用。摘要失败时 fail-open；已有冻结摘要时会尽量复用。`count_tokens` 只应用已有摘要，不发起新的摘要调用。请求头 `X-Awerouter-Token-Saver: off` 会同时关闭 awecompress、ODCP 和 RTK。
+
+```json
+"cc-router-1": {
+  "protocol": "anthropic",
+  "longContextThreshold": 8000,
+  "awecompress": {
+    "summaryModel": "flash",
+    "thresholdTokens": 60000,
+    "keepRecentTurns": 4,
+    "minSpanTokens": 8000,
+    "protectedTools": ["task", "skill", "todowrite"],
+    "protectedFilePatterns": ["**/*.schema.json"]
+  },
+  "destinations": { "flash": "stepfun,step-3.7-flash", "pro": "anthropic,claude-opus-5" }
+}
+```
+
+### RTK 与 ODCP
 
 > **⚠️ 试验性功能——所以默认关闭。** 两层都是有损的。RTK 压缩：超长文件读取只保留头尾 + 函数签名等骨架行（截断标记会注明 offset，模型可据此重读中段）；grep 每文件最多保留 10 条命中；diff 有行数上限；格式识别是启发式的，偶尔会在特殊内容上误判。ODCP 裁剪则是整段删除：被去重的旧输出直接消失，不是截断。模型通常会察觉并重读，代价是多一轮。如果发现 agent 行为异常（反复重读同一批文件、漏掉细节），关掉对应层，或对该会话发送 `X-Awerouter-Token-Saver: off`。实际省了多少可用 `awerouter usage log` 查看。
 
