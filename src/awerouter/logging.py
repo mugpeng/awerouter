@@ -152,23 +152,12 @@ def token_totals(since=None, profile=None) -> dict:
     Input-side accounting for `savings`: message tokens of flash-served requests
     are exactly the pro input tokens a pro-only setup would additionally bill.
     """
-    f = _log_file()
-    if not f.exists():
-        return {}
     out = {
         "flash": {"requests": 0, "tokens": 0},
         "pro": {"requests": 0, "tokens": 0},
         "fallback": 0,
     }
-    for line in f.read_text(encoding="utf-8").splitlines():
-        if not line:
-            continue
-        try:
-            data = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if not _passes(data, since, profile):
-            continue
+    for data in _entries(since, profile):
         dest = data.get("destination", "")
         if dest in out:
             out[dest]["requests"] += 1
@@ -186,18 +175,7 @@ def rtk_totals(since=None, profile=None) -> dict:
     would-have-been extra — not a subset of the logged totals.
     """
     out = {"saved": 0, "requests": 0}
-    f = _log_file()
-    if not f.exists():
-        return out
-    for line in f.read_text(encoding="utf-8").splitlines():
-        if not line:
-            continue
-        try:
-            data = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if not _passes(data, since, profile):
-            continue
+    for data in _entries(since, profile):
         if data.get("rtk_saved", 0):
             out["saved"] += data["rtk_saved"]
             out["requests"] += 1
@@ -209,18 +187,7 @@ def odcp_totals(since=None, profile=None) -> dict:
     were pruned. token_count in the log is post-pruning, so this is
     would-have-been extra — not a subset of the logged totals."""
     out = {"saved": 0, "requests": 0}
-    f = _log_file()
-    if not f.exists():
-        return out
-    for line in f.read_text(encoding="utf-8").splitlines():
-        if not line:
-            continue
-        try:
-            data = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if not _passes(data, since, profile):
-            continue
+    for data in _entries(since, profile):
         if data.get("odcp_saved", 0):
             out["saved"] += data["odcp_saved"]
             out["requests"] += 1
@@ -232,18 +199,7 @@ def awecompress_totals(since=None, profile=None) -> dict:
     many requests carried one. token_count in the log is post-compression, so
     this is would-have-been extra — not a subset of the logged totals."""
     out = {"saved": 0, "requests": 0}
-    f = _log_file()
-    if not f.exists():
-        return out
-    for line in f.read_text(encoding="utf-8").splitlines():
-        if not line:
-            continue
-        try:
-            data = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if not _passes(data, since, profile):
-            continue
+    for data in _entries(since, profile):
         if data.get("awecompress_saved", 0):
             out["saved"] += data["awecompress_saved"]
             out["requests"] += 1
@@ -257,23 +213,12 @@ def token_breakdown(since=None, profile=None) -> dict:
     Entries logged before the per-type breakdown exist count separately as
     legacy (their token_count cannot be split retroactively).
     """
-    f = _log_file()
-    if not f.exists():
-        return {}
     by_type: dict = {}
     file_search = 0
     requests = 0
     legacy_requests = 0
     legacy_tokens = 0
-    for line in f.read_text(encoding="utf-8").splitlines():
-        if not line:
-            continue
-        try:
-            data = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if not _passes(data, since, profile):
-            continue
+    for data in _entries(since, profile):
         tokens = data.get("tokens") or {}
         if tokens:
             requests += 1
@@ -303,21 +248,11 @@ def cadence(since=None, profile=None) -> dict:
     gaps <= TTL mean the pro prefix cache survives; expired gaps mean the
     next pro request re-warms it at cache-write price.
     """
-    f = _log_file()
-    if not f.exists():
+    if not _log_file().exists():   # missing file: {} — an empty one reports zeros below
         return {}
     rows = []
-    for line in f.read_text(encoding="utf-8").splitlines():
-        if not line:
-            continue
-        try:
-            data = json.loads(line)
-            ts = datetime.fromisoformat(data["ts"])
-        except (json.JSONDecodeError, KeyError, ValueError):
-            continue
-        if not _passes(data, since, profile):
-            continue
-        rows.append((ts, data.get("destination", "")))
+    for data in _entries(since, profile, require_ts=True):
+        rows.append((_entry_ts(data), data.get("destination", "")))
     rows.sort()
     if not rows:
         return {}
@@ -387,6 +322,28 @@ def _passes(data: dict, since, profile) -> bool:
     return True
 
 
+def _entries(since=None, profile=None, require_ts: bool = False):
+    """Yield parsed request-log rows, oldest first — the single read+parse
+    path for the analytics readers. Malformed lines are skipped. require_ts
+    also drops rows without a parseable timestamp (cadence needs real times;
+    otherwise only a windowed query drops them, via _passes)."""
+    f = _log_file()
+    if not f.exists():
+        return
+    for line in f.read_text(encoding="utf-8").splitlines():
+        if not line:
+            continue
+        try:
+            data = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if require_ts and _entry_ts(data) is None:
+            continue
+        if not _passes(data, since, profile):
+            continue
+        yield data
+
+
 def log_start():
     """Timestamp of the oldest retained entry (coverage floor for windows)."""
     f = _log_file()
@@ -420,27 +377,14 @@ def stats(since=None, profile=None) -> dict:
     unparseable ts are excluded when a filter is active).
     profile: restrict to one routing profile id (None = all).
     """
-    f = _log_file()
-    if not f.exists():
+    if not _log_file().exists():   # missing file: {} — an empty one reports zeros below
         return {}
     by_profile: dict = {}
     total_tokens = 0
     total_requests = 0
     errors = 0
     fallbacks = 0
-    for line in f.read_text(encoding="utf-8").splitlines():
-        if not line:
-            continue
-        try:
-            data = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if since is not None:
-            ts = _entry_ts(data)
-            if ts is None or ts < since:
-                continue
-        if profile is not None and (data.get("profile", "") or "(unknown)") != profile:
-            continue
+    for data in _entries(since, profile):
         label = data.get("label", "unknown")
         dest = data.get("destination", "unknown")
         prov = data.get("provider", "unknown")
@@ -549,19 +493,10 @@ def _l3_tokens(since=None, profile=None, discount: float = 0.3) -> list:
     matter where the threshold sits (L1/L2, toolEdit) are skipped. File-search
     result tokens are weighed at `discount` — the same number L3 compares.
     """
-    f = _log_file()
-    if not f.exists():
+    if not _log_file().exists():   # missing file: [] — an empty one reports [] below too
         return []
     tokens: list[int] = []
-    for line in f.read_text(encoding="utf-8").splitlines():
-        if not line:
-            continue
-        try:
-            data = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if not _passes(data, since, profile):
-            continue
+    for data in _entries(since, profile):
         if _base_label(data.get("label", "")) not in _L3_LABELS:
             continue
         tokens.append(effective_tokens(

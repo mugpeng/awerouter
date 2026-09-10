@@ -1571,6 +1571,31 @@ class TestHotReload:
         asyncio.run(t())
         assert app["profile"].long_context_threshold == 4000
 
+    def test_watcher_announces_broken_config_once(self, tmp_path, monkeypatch, capsys):
+        """A broken config file announces itself once, not again on every poll
+        tick while it stays broken — a background daemon's log must not spam."""
+        from awerouter import server
+
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+        monkeypatch.setattr(server, "_RELOAD_POLL_S", 0.05)
+        self._write_config(tmp_path)
+        app = self._app()
+
+        async def t():
+            task = asyncio.ensure_future(server._watch_config(app, "cc-1"))
+            await asyncio.sleep(0.2)  # let the watcher snapshot the initial mtimes
+            (tmp_path / "routing.json").write_text("{ broken")
+            await asyncio.sleep(0.5)  # ~10 poll ticks with the file unchanged
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+        asyncio.run(t())
+        assert app["profile"] is ROUTING  # the previous config stayed serving
+        assert capsys.readouterr().out.count("reload skipped") == 1
+
 
 class TestRtk:
     """rtk compression: opt-in per profile, applied before upstream forwarding."""

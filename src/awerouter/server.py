@@ -438,22 +438,28 @@ class _RoutingState:
         return "direct" if self.direct_dest is not None else self.profile.name
 
 
-def _log_failure(state: _RoutingState, request_id: str, t0: float, status: int) -> None:
-    """Log requests that never got an upstream response (502 path)."""
-    cand = state.queue[state.queue_pos]
-    dest = cand.dest
+def _append_log(state: _RoutingState, request_id: str, t0: float,
+                status: "int | None", dest, dest_key: str, byte_count: int = 0,
+                ms: "int | None" = None, duration_ms: "int | None" = None) -> None:
+    """One usage-log row for a finished request attempt — the single place
+    the RequestLog field set lives (failed, buffered-codex, and streamed
+    attempts all log the same shape). ms defaults to now (time to first
+    byte); duration_ms defaults to now too — _log_failure passes 0 because
+    no response ever arrived."""
+    now_ms = int((time.monotonic() - t0) * 1000)
     ensure_log_dir()
     append(RequestLog(
         ts=_now_iso(),
         request_id=request_id,
         model_in=state.inbound_model or "<none>",
         label=state.result.label,
-        destination=cand.tier,
+        destination=dest_key,
         provider=dest.provider_name,
         model_out=dest.model,
         status=status,
-        ms=int((time.monotonic() - t0) * 1000),
-        bytes=0,
+        ms=ms if ms is not None else now_ms,
+        duration_ms=duration_ms if duration_ms is not None else now_ms,
+        bytes=byte_count,
         token_count=state.result.inspect.token_count,
         tokens=state.result.inspect.token_breakdown,
         file_search_tokens=state.result.inspect.file_search_tokens,
@@ -466,6 +472,12 @@ def _log_failure(state: _RoutingState, request_id: str, t0: float, status: int) 
         codex_retried=state.codex_retried,
         fallback_hops=state.fallback_hops,
     ))
+
+
+def _log_failure(state: _RoutingState, request_id: str, t0: float, status: int) -> None:
+    """Log requests that never got an upstream response (502/503 path)."""
+    cand = state.queue[state.queue_pos]
+    _append_log(state, request_id, t0, status, cand.dest, cand.tier, duration_ms=0)
 
 
 def _protocol_mismatch(request: web.Request, endpoint_protocol: str) -> web.HTTPBadRequest:
@@ -714,6 +726,51 @@ async def _awecompress_apply(app, session, body: dict, protocol: str,
         return 0
 
 
+async def _prepare_body(request: web.Request, request_id: str, session,
+                        body: dict, protocol: str, profile, providers: dict,
+                        settings, direct_dest=None, allow_summary: bool = True):
+    """The body-preparation chain every message-shaped endpoint runs before
+    routing — one place, one order: image bridge, awecompress, odcp, rtk.
+
+    Bridge first: history images become flash transcriptions, so what the
+    savers compress and the router scores is exactly what goes upstream.
+    awecompress before odcp/rtk: the oldest turns become one frozen summary
+    first; odcp prunes what remains and rtk shrinks it. All of it runs before
+    routing, so L3 decisions, effective_tokens, count_tokens estimates, and
+    the usage log reflect what is actually sent (and billed) upstream.
+
+    allow_summary=False (count_tokens) applies existing frozen summaries but
+    never mints one — no surprise LLM calls off a token count. Direct gateway
+    forwards skip the chain. Returns (awecompress, odcp, rtk) saved-token
+    estimates for the usage log; the per-request x-awerouter-token-saver
+    header gates the three savers (the bridge is a capability need, not a
+    token saver, and always runs when the profile opts in).
+    """
+    if direct_dest is not None:
+        return 0, 0, 0
+    if settings.image_bridge:
+        await _bridge_images(request_id, session, body, protocol,
+                             profile, providers, settings)
+    awecompress_saved = odcp_saved = rtk_saved = 0
+    if _awecompress_enabled(request, profile):
+        awecompress_saved = await _awecompress_apply(
+            request.app, session, body, protocol, profile, providers,
+            allow_summary=allow_summary)
+    if _odcp_enabled(request, profile):
+        stats = odcp.prune_body(body, protocol, profile.odcp)
+        line = odcp.format_log(stats)
+        if line:
+            print(line)
+        odcp_saved = stats.saved_tokens if stats else 0
+    if _rtk_enabled(request, profile):
+        stats = rtk.compress_body(body, protocol)
+        line = rtk.format_log(stats)
+        if line:
+            print(line)
+        rtk_saved = stats.saved_tokens if stats else 0
+    return awecompress_saved, odcp_saved, rtk_saved
+
+
 async def _proxy_flow(request: web.Request, endpoint_protocol: str) -> web.StreamResponse:
     """Generic same-protocol proxy flow: route, forward, retry, stream back, log."""
     session: aiohttp.ClientSession = request.app["session"]
@@ -747,47 +804,12 @@ async def _proxy_flow(request: web.Request, endpoint_protocol: str) -> web.Strea
         sock_read=None if is_stream else 120,
     )
 
-    # Image bridge before rtk/routing: history images become flash
-    # transcriptions, so what rtk compresses and the router scores is
-    # exactly what goes upstream.
     direct_dest = entry.direct_dest if gateway is not None else None
-
-    if settings.image_bridge and direct_dest is None:
-        await _bridge_images(request_id, session, body, endpoint_protocol,
-                             profile, providers, settings)
-
-    # awecompress before odcp/rtk: the oldest turns become one frozen summary
-    # first (one summary call to the resolved destination when the covered
-    # span grows — routed, not label-guessed, so a big transcript can never
-    # be mispriced to pro by L3); odcp then prunes what remains and rtk
-    # shrinks it. All three run before routing: L3 decisions, effective_tokens,
-    # and the usage log reflect what is actually sent (and billed) upstream.
+    # One chain, one order, shared with count_tokens (see _prepare_body).
     # Runs once — retries and the flash→pro fallback reuse the same body.
-    awecompress_saved = 0
-    if _awecompress_enabled(request, profile) and direct_dest is None:
-        awecompress_saved = await _awecompress_apply(
-            request.app, session, body, endpoint_protocol, profile, providers)
-
-    # odcp pruning before rtk: whole superseded outputs become one-line
-    # placeholders first, then rtk compresses the size of what remains. Both
-    # run before routing: L3 decisions, effective_tokens, and the usage log
-    # reflect what is actually sent (and billed) upstream. Runs once —
-    # retries and the flash→pro fallback reuse the same body.
-    odcp_saved = 0
-    if _odcp_enabled(request, profile) and direct_dest is None:
-        odcp_stats = odcp.prune_body(body, endpoint_protocol, profile.odcp)
-        line = odcp.format_log(odcp_stats)
-        if line:
-            print(line)
-        odcp_saved = odcp_stats.saved_tokens if odcp_stats else 0
-
-    rtk_saved = 0
-    if _rtk_enabled(request, profile) and direct_dest is None:
-        stats = rtk.compress_body(body, endpoint_protocol)
-        line = rtk.format_log(stats)
-        if line:
-            print(line)
-        rtk_saved = stats.saved_tokens if stats else 0
+    awecompress_saved, odcp_saved, rtk_saved = await _prepare_body(
+        request, request_id, session, body, endpoint_protocol,
+        profile, providers, settings, direct_dest)
 
     state = _RoutingState(profile, settings, body,
                           _agent_from_ua(request.headers.get("User-Agent", "")),
@@ -884,7 +906,6 @@ async def _proxy_flow(request: web.Request, endpoint_protocol: str) -> web.Strea
             raw = await up.read()
             up.close()
             byte_count = len(raw)
-            ms = int((time.monotonic() - t0) * 1000)
             obj = _codex_sse_response(raw)
             if obj is None:
                 response_body = {
@@ -899,31 +920,7 @@ async def _proxy_flow(request: web.Request, endpoint_protocol: str) -> web.Strea
             else:
                 response_body = obj
                 response_status = 200
-            ensure_log_dir()
-            append(RequestLog(
-                ts=_now_iso(),
-                request_id=request_id,
-                model_in=state.inbound_model or "<none>",
-                label=state.result.label,
-                destination=dest_key,
-                provider=dest.provider_name,
-                model_out=dest.model,
-                status=response_status,
-                ms=ms,
-                duration_ms=int((time.monotonic() - t0) * 1000),
-                bytes=byte_count,
-                token_count=state.result.inspect.token_count,
-                tokens=state.result.inspect.token_breakdown,
-                file_search_tokens=state.result.inspect.file_search_tokens,
-                rtk_saved=state.rtk_saved,
-                odcp_saved=state.odcp_saved,
-                awecompress_saved=state.awecompress_saved,
-                profile=state.log_profile,
-                protocol=state.protocol,
-                agent=state.agent,
-                codex_retried=state.codex_retried,
-                fallback_hops=state.fallback_hops,
-            ))
+            _append_log(state, request_id, t0, response_status, dest, dest_key, byte_count)
             return web.json_response(response_body, status=response_status)
 
         # Success path or non-fallbackable error — stream back
@@ -963,31 +960,7 @@ async def _proxy_flow(request: web.Request, endpoint_protocol: str) -> web.Strea
             up.close()
 
         # Log (always, even on disconnect — needed for calibration)
-        ensure_log_dir()
-        append(RequestLog(
-            ts=_now_iso(),
-            request_id=request_id,
-            model_in=state.inbound_model or "<none>",
-            label=state.result.label,
-            destination=dest_key,
-            provider=dest.provider_name,
-            model_out=dest.model,
-            status=status,
-            ms=ms,
-            duration_ms=int((time.monotonic() - t0) * 1000),
-            bytes=byte_count,
-            token_count=state.result.inspect.token_count,
-            tokens=state.result.inspect.token_breakdown,
-            file_search_tokens=state.result.inspect.file_search_tokens,
-            rtk_saved=state.rtk_saved,
-            odcp_saved=state.odcp_saved,
-            awecompress_saved=state.awecompress_saved,
-            profile=state.log_profile,
-            protocol=state.protocol,
-            agent=state.agent,
-            codex_retried=state.codex_retried,
-            fallback_hops=state.fallback_hops,
-        ))
+        _append_log(state, request_id, t0, status, dest, dest_key, byte_count, ms=ms)
 
         return resp
 
@@ -1089,24 +1062,13 @@ async def handle_count_tokens(request: web.Request) -> web.Response:
         resolve_model = None
         direct_dest = None
 
-    # Same pruning and compression as /v1/messages: the client's
-    # context-window estimate must match what actually gets sent upstream.
-    # awecompress applies existing summaries but never mints one here — no
-    # surprise LLM calls off a token count.
-    if _awecompress_enabled(request, profile) and direct_dest is None:
-        await _awecompress_apply(request.app, session, body, "anthropic",
-                                 profile, providers, allow_summary=False)
-    if _odcp_enabled(request, profile) and direct_dest is None:
-        odcp.prune_body(body, "anthropic", profile.odcp)
-    if _rtk_enabled(request, profile) and direct_dest is None:
-        rtk.compress_body(body, "anthropic")
-
-    # Image bridge here too, for the same reason: the token estimate must
-    # reflect the transcriptions that /v1/messages would actually send.
-    if settings.image_bridge and direct_dest is None:
-        rid = request.headers.get("x-request-id") or uuid.uuid4().hex[:12]
-        await _bridge_images(rid, session, body, "anthropic",
-                             profile, providers, settings)
+    # Same chain and order as /v1/messages (see _prepare_body): the client's
+    # context-window estimate must match what actually gets sent upstream —
+    # but never mint a new frozen summary off a token count.
+    rid = request.headers.get("x-request-id") or uuid.uuid4().hex[:12]
+    await _prepare_body(request, rid, session, body, "anthropic",
+                        profile, providers, settings, direct_dest,
+                        allow_summary=False)
 
     # Resolve destination (same logic as messages)
     result = (ResolveResult("direct", direct_dest.model, "direct", extract("anthropic", body))
@@ -1381,10 +1343,11 @@ async def _watch_config(app, profile_name: "str | None") -> None:
         now = _config_mtimes()
         if now == last:
             continue
-        changed = (_reload_config(app, profile_name)
-                   if profile_name is not None else _reload_gateway(app))
-        if changed:
-            last = now
+        if profile_name is not None:
+            _reload_config(app, profile_name)
+        else:
+            _reload_gateway(app)
+        last = now
 
 
 # ---------------------------------------------------------------------------
