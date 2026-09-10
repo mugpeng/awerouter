@@ -2,8 +2,6 @@
 
 import json
 
-import pytest
-
 from awerouter import odcp
 from awerouter.types import OdcpConfig
 
@@ -238,7 +236,7 @@ class TestPurgeErrors:
             ]},
             {"role": "tool", "tool_call_id": "c1", "content": "Error: boom"},
         ]}
-        stats = odcp.prune_body(body, "openai-chat", CFG)
+        odcp.prune_body(body, "openai-chat", CFG)
         assert body["messages"][1]["tool_calls"][0]["function"]["arguments"] == json.dumps({"command": BIG})
         assert body["messages"][2]["content"] == "Error: boom"
 
