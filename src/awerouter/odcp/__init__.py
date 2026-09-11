@@ -33,7 +33,7 @@ import json
 import sys
 from dataclasses import dataclass, field
 
-from awerouter.protocols import EDIT_TOOLS, estimate_tokens
+from awerouter.protocols import EDIT_TOOLS, _call_is_edit, estimate_tokens
 
 # One-line, self-describing replacement notes: the model must understand why
 # content vanished and that nothing is hidden from it maliciously.
@@ -53,8 +53,9 @@ _PROTECTED_TOOLS = (
 )
 
 
-def _is_protected(name: str) -> bool:
-    return name.lower().replace("_", "").replace("-", "") in _PROTECTED_TOOLS
+def _is_protected(name: str, arguments=None) -> bool:
+    return (name.lower().replace("_", "").replace("-", "") in _PROTECTED_TOOLS
+            or _call_is_edit(name, arguments))
 
 
 @dataclass
@@ -134,7 +135,7 @@ def _dedup(calls: list, config, stats: OdcpStats) -> None:
         return
     kept: dict = {}
     for call in calls:
-        if call.errored or _is_protected(call.name):
+        if call.errored or _is_protected(call.name, call.arguments):
             continue
         sig = _signature(call.name, call.arguments)
         prev = kept.get(sig)
@@ -150,7 +151,7 @@ def _purge_errors(calls: list, config, stats: OdcpStats, total_users: int) -> No
     if not config.purge_errors:
         return
     for call in calls:
-        if not call.errored or _is_protected(call.name):
+        if not call.errored or _is_protected(call.name, call.arguments):
             continue
         if call.user_index is None \
                 or total_users - 1 - call.user_index < config.purge_turns:
@@ -193,15 +194,15 @@ def _record(stats: OdcpStats, strategy: str, before: str, after: str) -> bool:
 
 
 def _signature(name: str, arguments) -> str:
-    """A call's identity: tool name plus arguments with None values dropped
-    and keys sorted, so '{"a":1,"b":2}' and '{"b":2,"a":1}' collapse."""
+    """A call's identity: tool name plus recursively sorted arguments, so
+    '{"a":1,"b":2}' and '{"b":2,"a":1}' collapse."""
     return name + "::" + json.dumps(
         _canonical(arguments), sort_keys=True, ensure_ascii=False)
 
 
 def _canonical(value):
     if isinstance(value, dict):
-        return {k: _canonical(v) for k, v in sorted(value.items()) if v is not None}
+        return {k: _canonical(v) for k, v in sorted(value.items())}
     if isinstance(value, list):
         return [_canonical(v) for v in value]
     return value

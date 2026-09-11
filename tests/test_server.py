@@ -2485,12 +2485,14 @@ class TestAwecompressPipeline:
 
         async def t():
             bodies = []
+            summary_headers = []
 
             async def up(request):
                 body = await request.json()
                 bodies.append(body)
                 sys = body.get("system")
                 if isinstance(sys, str) and sys.startswith("You compress"):
+                    summary_headers.append(request.headers.get("anthropic-version"))
                     # the summary side-call: answer with summary text
                     return web.json_response({"content": [
                         {"type": "text", "text": "FROZEN SUMMARY"}]})
@@ -2514,6 +2516,7 @@ class TestAwecompressPipeline:
                                      and b["system"].startswith("You compress")]
                     assert len(summary_calls) == 1
                     assert summary_calls[0]["model"] == "step-3.5-flash"  # flash destination
+                    assert summary_headers == ["2023-06-01"]
 
                     forwarded = bodies[-1]
                     assert "FROZEN SUMMARY" in forwarded["messages"][0]["content"][0]["text"]

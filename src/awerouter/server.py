@@ -695,8 +695,11 @@ async def _awecompress_apply(app, session, body: dict, protocol: str,
         async def sender(request_body: dict) -> dict:
             # _proxy_request handles the provider's auth (subscription logins
             # included), the model rewrite, codex quirks, and the shell proxy.
+            headers = {"content-type": "application/json"}
+            if protocol == "anthropic":
+                headers["anthropic-version"] = "2023-06-01"
             up = await _proxy_request(session, request_body, dest, providers,
-                                      {"content-type": "application/json"},
+                                      headers,
                                       ENDPOINT_PATHS[protocol],
                                       AWECOMPRESS_SUMMARY_TIMEOUT)
             try:
@@ -1745,6 +1748,8 @@ def _reload_gateway(app) -> bool:
     the previous set serving; in-flight requests keep what they captured."""
     try:
         new_entries, new_default = _load_gateway_state()
+        for entry in new_entries.values():
+            _awecompress_validate(entry.profile, entry.providers)
     except SystemExit as exc:
         print(f"  config reload skipped (serving the previous config): {exc}")
         return False

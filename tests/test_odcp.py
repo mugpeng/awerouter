@@ -39,8 +39,9 @@ class TestSignature:
     def test_key_order_irrelevant(self):
         assert odcp._signature("Bash", {"a": 1, "b": 2}) == odcp._signature("Bash", {"b": 2, "a": 1})
 
-    def test_none_values_dropped(self):
-        assert odcp._signature("Bash", {"a": 1}) == odcp._signature("Bash", {"a": 1, "b": None})
+    def test_explicit_none_differs_from_missing_value(self):
+        assert odcp._signature("Bash", {"a": 1}) != odcp._signature(
+            "Bash", {"a": 1, "b": None})
 
     def test_nested_normalization(self):
         a = {"x": {"b": 2, "a": None}, "y": [1, {"k": None, "j": 2}]}
@@ -303,6 +304,19 @@ class TestDedupOpenaiResponses:
         odcp.prune_body(body, "openai-responses", CFG)
         assert body["input"][2]["output"][0]["text"] == DEDUP_NOTE
         assert body["input"][4]["output"][0]["text"] == BIG
+
+    def test_shell_wrapped_apply_patch_output_is_protected(self):
+        body = {"model": "m", "input": [
+            {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "go"}]},
+            {"type": "function_call", "call_id": "c1", "name": "exec_command",
+             "arguments": json.dumps({"cmd": "apply_patch <<'PATCH'\n*** Begin Patch\nPATCH"})},
+            {"type": "function_call_output", "call_id": "c1", "output": BIG},
+            {"type": "function_call", "call_id": "c2", "name": "exec_command",
+             "arguments": json.dumps({"cmd": "apply_patch <<'PATCH'\n*** Begin Patch\nPATCH"})},
+            {"type": "function_call_output", "call_id": "c2", "output": BIG},
+        ]}
+        odcp.prune_body(body, "openai-responses", CFG)
+        assert body["input"][2]["output"] == BIG
 
 
 # ---------------------------------------------------------------------------

@@ -6,6 +6,7 @@ import ipaddress
 import json
 import os
 import re
+import shlex
 import shutil
 from dataclasses import replace
 from pathlib import Path
@@ -1130,7 +1131,7 @@ def config_login_cmd(account, home):
         # The codex CLI owns its login (and its single-use refresh tokens);
         # awerouter only reads auth.json, so the login happens in the CLI.
         if home:
-            click.echo(f"codex logins live in the codex CLI — run: CODEX_HOME={home} codex login")
+            click.echo(f"codex logins live in the codex CLI — run: {_codex_home_command(home, 'login')}")
             click.echo("(an aweswitch account dir works as-is: aweswitch account login codex <name>)")
             click.echo(f"awerouter picks the result up from {home}/auth.json automatically.")
         else:
@@ -1172,7 +1173,7 @@ def config_logout_cmd(account, home):
     home = str(Path(home).expanduser()) if home else None
     if account == "codex":
         if home:
-            click.echo(f"codex logins live in the codex CLI — run: CODEX_HOME={home} codex logout")
+            click.echo(f"codex logins live in the codex CLI — run: {_codex_home_command(home, 'logout')}")
         else:
             click.echo("codex logins live in the codex CLI — run: codex logout")
         return
@@ -1182,6 +1183,14 @@ def config_logout_cmd(account, home):
         click.echo(f"no claude login found ({claude.claude_auth_path(home)})")
         return
     click.echo(f"removed {removed}")
+
+
+def _codex_home_command(home: str, action: str) -> str:
+    if os.name == "nt":
+        if '"' in home:
+            die("Codex authHome cannot contain a double quote on Windows")
+        return f'set "CODEX_HOME={home}" && codex {action}'
+    return f"CODEX_HOME={shlex.quote(home)} codex {action}"
 
 
 @config.command("restore")

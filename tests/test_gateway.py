@@ -612,6 +612,24 @@ class TestGatewayHotReload:
         assert app["gateway"] is old
         assert "reload skipped" in capsys.readouterr().out
 
+    def test_invalid_awecompress_config_keeps_serving_previous(self, tmp_path, monkeypatch, capsys):
+        from awerouter import server as server_mod
+
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+        monkeypatch.setattr(server_mod, "Compressor", object)
+        self._write(tmp_path, {"glm": 8000})
+        app = self._app()
+        assert _reload_gateway(app) is True
+        old = app["gateway"]
+        routing_path = tmp_path / "routing.json"
+        routing = json.loads(routing_path.read_text())
+        routing["glm"]["awecompress"] = {"summaryModel": "missing-model"}
+        routing_path.write_text(json.dumps(routing))
+
+        assert _reload_gateway(app) is False
+        assert app["gateway"] is old
+        assert "missing-model" in capsys.readouterr().out
+
     def test_empty_config_keeps_serving_previous(self, tmp_path, monkeypatch, capsys):
         monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
         self._write(tmp_path, {"glm": 8000})

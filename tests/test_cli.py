@@ -1044,6 +1044,20 @@ class TestLoginLogout:
         assert "CODEX_HOME=" in r.output
         assert "auth.json" in r.output
 
+    def test_login_codex_quotes_authhome_with_spaces(self, tmp_path, monkeypatch):
+        _setup(tmp_path, monkeypatch)
+        home = tmp_path / "codex accounts"
+        r = CliRunner().invoke(cli, ["config", "login", "codex", str(home)])
+        assert r.exit_code == 0, r.output
+        assert f"CODEX_HOME='{home}' codex login" in r.output
+
+    def test_windows_codex_command_rejects_quote_in_authhome(self, monkeypatch):
+        from awerouter import config as config_mod
+
+        monkeypatch.setattr(config_mod.os, "name", "nt")
+        with pytest.raises(SystemExit, match="cannot contain a double quote"):
+            config_mod._codex_home_command('C:\\bad" & whoami', "login")
+
     def test_logout_claude_removes_store(self, tmp_path, monkeypatch):
         monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
         (tmp_path / "claude-auth.json").write_text("{}", encoding="utf-8")
