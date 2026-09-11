@@ -27,7 +27,8 @@ jobs:
         run: |
           python -c "import os, sys; from awerouter import __version__ as version; tag = os.environ['GITHUB_REF_NAME'].removeprefix('v'); sys.exit(f'tag {tag} does not match package version {version}') if tag != version else print(f'Version {version} matches tag ' + os.environ['GITHUB_REF_NAME'])"
 
-      - run: python -m pytest
+      - run: ./verify
+        shell: bash
       - run: python -m build
       - run: python -m twine check dist/*
 
