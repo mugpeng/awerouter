@@ -27,10 +27,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "pytest-asyncio>=0.23", "awecompress @ git+https://github.com/wehuman01/awecompress.git@7a4dc22"]
-# In-process frozen-summary history compression (routing.json "awecompress"
-# profile flag); also as its own extra: pip install awerouter[compress].
-compress = ["awecompress @ git+https://github.com/wehuman01/awecompress.git@7a4dc22"]
+dev = ["pytest>=8", "pytest-asyncio>=0.23", "awecompress>=0.2"]
+ # In-process frozen-summary history compression (routing.json "awecompress"
+ # profile flag); also as its own extra: pip install awerouter[compress].
+compress = ["awecompress>=0.2"]
 
 [project.scripts]
 awerouter = "awerouter.cli:main"
