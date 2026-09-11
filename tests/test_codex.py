@@ -57,6 +57,36 @@ class TestLoadCodexLogin:
         assert auth_json_path() == codex_home / "auth.json"
 
 
+class TestAuthHome:
+    """An explicit home (a provider's authHome) points the login at one
+    account's CLI config dir; several codex accounts ride side by side."""
+
+    def test_home_wins_over_codex_home_env(self, codex_home, tmp_path):
+        account = tmp_path / "accounts" / "heck"
+        account.mkdir(parents=True)
+        _write_login(account, "tok-heck", "acct-heck")
+        assert auth_json_path(str(account)) == account / "auth.json"
+        assert load_codex_login(str(account)) == ("tok-heck", "acct-heck")
+
+    def test_missing_login_names_the_home(self, codex_home, tmp_path):
+        account = tmp_path / "accounts" / "nope"
+        with pytest.raises(CodexAuthError, match="CODEX_HOME="):
+            load_codex_login(str(account))
+
+    def test_apply_writes_that_accounts_headers(self, codex_home, tmp_path):
+        account = tmp_path / "accounts" / "heck"
+        account.mkdir(parents=True)
+        _write_login(account, "tok-heck", "acct-heck")
+        headers = {}
+        apply_codex_auth(headers, str(account))
+        assert headers["authorization"] == "Bearer tok-heck"
+        assert headers["chatgpt-account-id"] == "acct-heck"
+
+    def test_default_home_hint_unchanged(self, codex_home):
+        with pytest.raises(CodexAuthError, match="run: codex login"):
+            load_codex_login()
+
+
 class TestApplyCodexAuth:
     def test_writes_full_header_set(self, codex_home):
         _write_login(codex_home, "tok-1", "acct-1")

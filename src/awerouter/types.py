@@ -27,6 +27,22 @@ class Provider:
     # 'provider/<model>' forward fails over to fellow members — same model,
     # declaration order wrapping from the named entry. Empty = pinned.
     pool: str = ""
+    # Directory holding this provider's subscription login (providers.json
+    # "authHome"): codex reads <authHome>/auth.json, claude keeps its owned
+    # store at <authHome>/claude-auth.json. Several accounts of one sentinel
+    # ride side by side as separate providers (an aweswitch account dir works
+    # as-is for codex). Empty = the default single-login location, exactly the
+    # pre-authHome behavior. Legal only next to a sentinel auth.
+    auth_home: str = ""
+
+    @property
+    def auth_key(self) -> "str | None":
+        """Identity of the login this provider rides (sentinel plus home), for
+        failover bookkeeping: two codex providers on different accounts must
+        not share one 'rejected' verdict. None = no auth header at all."""
+        if not self.auth:
+            return None
+        return f"{self.auth}:{self.auth_home}" if self.auth_home else self.auth
 
 
 @dataclass

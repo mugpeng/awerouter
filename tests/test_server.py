@@ -992,6 +992,59 @@ class TestCodexAccount:
         # codex 401, re-read retry 401, deepseek 503 — codex2 never contacted
         assert len(calls) == 3
 
+    def test_rejected_login_spares_sibling_account(self, tmp_path):
+        """The same 401x2, but the queue's last codex entry rides a DIFFERENT
+        account (authHome): only the dead login is excluded — when the keyed
+        backup 503s, the sibling account serves the request. Rejection is per
+        login, not per sentinel."""
+        calls = []
+
+        async def t():
+            async def up(request):
+                acct = request.headers.get("chatgpt-account-id")
+                calls.append(acct)
+                if acct == "acct-dead":
+                    return web.json_response(
+                        {"error": {"message": "invalid token"}}, status=401)
+                if acct is None:  # keyed backup
+                    return web.json_response({"error": "boom"}, status=503)
+                return web.Response(text=self.SSE_OK, content_type="text/event-stream")
+
+            up_app = web.Application()
+            up_app.router.add_post("/responses", up)
+            up_server = TestServer(up_app)
+            await up_server.start_server()
+            try:
+                self._login("tok-stale", "acct-dead")
+                heck = tmp_path / "accounts" / "heck"
+                heck.mkdir(parents=True)
+                (heck / "auth.json").write_text(json.dumps(
+                    {"tokens": {"access_token": "tok-heck", "account_id": "acct-heck"}}),
+                    encoding="utf-8")
+                providers = {"openai-responses": {
+                    "codex": Provider("codex", f"http://127.0.0.1:{up_server.port}", "codex"),
+                    "deepseek": Provider("deepseek", f"http://127.0.0.1:{up_server.port}", "sk-x"),
+                    "codex-heck": Provider("codex-heck", f"http://127.0.0.1:{up_server.port}",
+                                           "codex", auth_home=str(heck)),
+                }}
+                profile = RoutingProfile("cx", "openai-responses", 32, {
+                    "flash": Destination("codex", "gpt-5.6-luna"),
+                    "pro": Destination("deepseek", "deepseek-chat"),
+                }, backups={"flash": [Destination("deepseek", "deepseek-chat"),
+                                      Destination("codex-heck", "gpt-5.6-luna")]})
+                async with TestClient(TestServer(create_app(providers, profile, SETTINGS))) as c:
+                    r = await c.post("/v1/responses", json={
+                        "model": "auto",
+                        "input": [{"role": "user", "content": "hi"}],
+                    })
+                    assert r.status == 200
+                    assert (await r.json())["id"] == "r1"
+            finally:
+                await up_server.close()
+        run(t())
+        # dead 401, re-read retry 401, keyed deepseek 503, sibling account 200
+        assert calls == ["acct-dead", "acct-dead", None, "acct-heck"]
+
     def test_second_401_surfaces_to_client(self):
         """Both destinations ride the same codex login: a fallback would just
         retry the dead login, so the 401 surfaces after the one re-read."""
@@ -1047,6 +1100,24 @@ class TestCodexAccount:
     def test_no_serve_warning_with_login(self):
         self._login()
         providers = {"codex": Provider("codex", "https://chatgpt.com/backend-api/codex", "codex")}
+        assert _codex_login_warning(providers) is None
+
+    def test_serve_warning_per_account(self, tmp_path):
+        """A dead sibling account warns on its own line; the healthy one does
+        not drag the whole sentinel into the warning."""
+        self._login()  # default login healthy
+        heck = tmp_path / "heck"
+        heck.mkdir()
+        providers = {
+            "codex": Provider("codex", "https://chatgpt.com/backend-api/codex", "codex"),
+            "codex-heck": Provider("codex-heck", "https://chatgpt.com/backend-api/codex",
+                                   "codex", auth_home=str(heck)),
+        }
+        w = _codex_login_warning(providers)
+        assert w is not None and "codex-heck" in w and "CODEX_HOME" in w
+        assert "\ncodex," not in w  # the healthy default login is not named
+        (heck / "auth.json").write_text(json.dumps(
+            {"tokens": {"access_token": "t", "account_id": "a"}}), encoding="utf-8")
         assert _codex_login_warning(providers) is None
 
     REMOTE = "https://chatgpt.com/backend-api/codex"
@@ -1286,6 +1357,20 @@ class TestClaudeAccount:
         self._login(expires_at=_time.time() - 60)
         providers = {"claude": Provider("claude", "https://api.anthropic.com", "claude")}
         assert _claude_login_warning(providers) is None
+
+    def test_serve_warning_per_account(self, tmp_path):
+        """A missing authHome login warns naming its dir; the healthy default
+        store is not implicated."""
+        self._login()
+        home = tmp_path / "accounts" / "claude-work"
+        providers = {
+            "claude": Provider("claude", "https://api.anthropic.com", "claude"),
+            "claude-work": Provider("claude-work", "https://api.anthropic.com",
+                                    "claude", auth_home=str(home)),
+        }
+        w = _claude_login_warning(providers)
+        assert w is not None and "claude-work" in w and str(home) in w
+        assert f"awerouter config login claude {home}" in w
 
 
 class TestAgentFromUA:

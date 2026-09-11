@@ -369,6 +369,17 @@ How it behaves:
 
 The sentinel only loads in the `openai-responses` group — the ChatGPT Codex backend speaks the Responses protocol.
 
+**Multiple accounts.** A provider may carry `"authHome"`: the CLI config dir whose `auth.json` this provider rides. An aweswitch account dir works as-is (`~/.config/aweswitch/accounts/codex/<name>` holds one `auth.json` per account), so several ChatGPT subscriptions sit side by side as separate providers:
+
+```json
+"codex-peng": { "base_url": "https://chatgpt.com/backend-api/codex", "auth": "codex",
+                "authHome": "~/.config/aweswitch/accounts/codex/cxo-peng", "pool": "chatgpt" },
+"codex-heck": { "base_url": "https://chatgpt.com/backend-api/codex", "auth": "codex",
+                "authHome": "~/.config/aweswitch/accounts/codex/cxo-heck", "pool": "chatgpt" }
+```
+
+A shared `pool` tag makes gateway `provider/<model>` forwards fail over between the accounts; a routing profile gets the same via `backups`. Failover bookkeeping is per login: one dead account's 401 excludes only that account, never its sibling. Absent `authHome` is exactly the single-login behavior above. Log an account in with `CODEX_HOME=<dir> codex login` (or `aweswitch account login codex <name>`); serve-start warnings and 503 hints name the dir that lacks a login.
+
 ### Claude account (subscription login)
 
 `"auth": "claude"` in the `anthropic` group routes through a Claude Pro/Max subscription login that awerouter itself owns (`awerouter config login claude` runs the same authorization flow the CLI uses; tokens live in `~/.config/awerouter/claude-auth.json`, mode 0600) — the local Claude Code CLI login is never used. The subscription's own models mix into flash/pro routing next to key-based providers:
@@ -391,6 +402,15 @@ The sentinel only loads in the `openai-responses` group — the ChatGPT Codex ba
 awerouter config login claude    # opens the browser; paste the code shown on the callback page
 awerouter config logout claude   # removes the stored login
 ```
+
+**Multiple accounts.** Same `"authHome"` mechanism as codex, pointing at any dir: that account's store lives at `<authHome>/claude-auth.json` instead of the config dir's single one, and `awerouter config login claude <dir>` fills it (each store refreshes independently):
+
+```json
+"claude-work": { "base_url": "https://api.anthropic.com", "auth": "claude",
+                 "authHome": "~/.config/awerouter/accounts/claude-work", "pool": "claude-sub" }
+```
+
+Absent `authHome` is exactly the single-login behavior above. Per-login failover bookkeeping, warnings, and logout (`awerouter config logout claude <dir>`) match codex.
 
 Point any Anthropic-protocol client at awerouter with a dummy key (Claude Code via `ANTHROPIC_BASE_URL` — the CLI's own login is never touched); auth headers and the OAuth flag are injected per request, with no body rewriting. How it behaves:
 
@@ -711,7 +731,7 @@ awerouter self-update [--check]        # upgrade to the latest PyPI release (--c
 awerouter config path                 # print both config file paths
 awerouter config show [PROFILE]       # redacted config; PROFILE = its providers + entry only
 awerouter config edit [providers|routing]  # open one file in $EDITOR (backs up to .bak first)
-awerouter config login [claude|codex]      # log in a subscription account (claude: browser PKCE)
+awerouter config login [claude|codex] [dir]  # log in a subscription account (claude: browser PKCE); dir = that account's authHome
 awerouter config logout [claude|codex]     # remove a stored subscription login
 awerouter config restore [providers|routing]  # restore a config file from its .bak backup
 awerouter usage stats [--since ..] [--profile ..]

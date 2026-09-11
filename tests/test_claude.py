@@ -129,6 +129,48 @@ class TestLoadClaudeLogin:
         assert on_disk["refresh_token"] == "rt-2"
         assert on_disk["expires_at"] == pytest.approx(time.time() + 3600, abs=5)
 
+
+class TestAuthHome:
+    """A home (a provider's authHome) relocates one account's store, so
+    several Claude subscriptions ride side by side."""
+
+    def test_store_lives_in_the_named_dir(self, store_dir, tmp_path):
+        home = tmp_path / "accounts" / "claude-work"
+        claude._write_store({"access_token": "at-work", "refresh_token": "rt",
+                             "expires_at": time.time() + 3600}, str(home))
+        assert claude_auth_path(str(home)) == home / "claude-auth.json"
+        assert load_claude_login(home=str(home)) == "at-work"
+        assert not claude_auth_path().exists()  # the default store is untouched
+
+    def test_missing_home_store_names_the_dir_in_the_hint(self, store_dir, tmp_path):
+        home = str(tmp_path / "accounts" / "nope")
+        with pytest.raises(ClaudeAuthError, match=f"config login claude {home}"):
+            load_claude_login(home=home)
+
+    def test_refresh_of_one_home_leaves_the_default_alone(self, store_dir, tmp_path, monkeypatch):
+        _write_store("at-default", "rt-default", expires_at=time.time() - 1)
+        home = tmp_path / "accounts" / "claude-work"
+        claude._write_store({"access_token": "at-work", "refresh_token": "rt-work",
+                             "expires_at": time.time() - 1}, str(home))
+        monkeypatch.setattr(claude, "_token_request",
+                            lambda p: _token_response("at-2", "rt-2"))
+        assert load_claude_login(home=str(home)) == "at-2"
+        on_disk = json.loads((home / "claude-auth.json").read_text(encoding="utf-8"))
+        assert on_disk["access_token"] == "at-2"
+        # the default store was not refreshed nor overwritten
+        assert json.loads(claude_auth_path().read_text(encoding="utf-8"))["access_token"] == "at-default"
+
+    def test_logout_removes_only_that_home(self, store_dir, tmp_path):
+        _write_store("at-default")
+        home = tmp_path / "accounts" / "claude-work"
+        home.mkdir(parents=True)
+        (home / "claude-auth.json").write_text("{}", encoding="utf-8")
+        removed = logout(str(home))
+        assert removed == home / "claude-auth.json"
+        assert claude_auth_path().exists()
+        assert login_status(str(home)) is None
+
+
     def test_refresh_without_new_refresh_token_keeps_old(self, store_dir, monkeypatch):
         _write_store("at-1", "rt-1", expires_at=time.time() - 1)
         monkeypatch.setattr(claude, "_token_request",

@@ -369,6 +369,17 @@ export ANTHROPIC_BASE_URL=http://127.0.0.1:20128
 
 该哨兵值只允许出现在 `openai-responses` 组——ChatGPT Codex 后端只说 Responses 协议。
 
+**多账号。** provider 可加 `"authHome"`：本条 provider 骑的那个 CLI 配置目录（从中读 `auth.json`）。aweswitch 的账号目录拿来即用（`~/.config/aweswitch/accounts/codex/<name>` 里每个账号一份 `auth.json`），于是多个 ChatGPT 订阅可以并排成为多个 provider：
+
+```json
+"codex-peng": { "base_url": "https://chatgpt.com/backend-api/codex", "auth": "codex",
+                "authHome": "~/.config/aweswitch/accounts/codex/cxo-peng", "pool": "chatgpt" },
+"codex-heck": { "base_url": "https://chatgpt.com/backend-api/codex", "auth": "codex",
+                "authHome": "~/.config/aweswitch/accounts/codex/cxo-heck", "pool": "chatgpt" }
+```
+
+共享 `pool` 标签后，gateway 的 `provider/<model>` 转发会在账号间故障转移；路由 profile 用 `backups` 达到同样效果。故障转移按登录记账：一个账号死透的 401 只排除该账号，绝不连坐兄弟账号。不写 `authHome` 就是上面的单登录行为。登录某个账号用 `CODEX_HOME=<dir> codex login`（或 `aweswitch account login codex <name>`）；serve 启动警告和 503 提示都会点名缺登录的目录。
+
 ### Claude 账号（订阅登录）
 
 `anthropic` 组里的 `"auth": "claude"` 表示用 Claude Pro/Max 订阅登录作为上游。这个登录由 awerouter 自己持有（`awerouter config login claude` 走 Claude Code 同款授权流程，token 存 `~/.config/awerouter/claude-auth.json`，权限 0600），不借用本机 CLI 的登录态。订阅自带的模型就这样和 key 计费的模型混进同一个 flash/pro 路由：
@@ -391,6 +402,15 @@ export ANTHROPIC_BASE_URL=http://127.0.0.1:20128
 awerouter config login claude    # 打开浏览器授权，把回调页显示的 code 粘回来
 awerouter config logout claude   # 删除本地登录
 ```
+
+**多账号。** 与 codex 同一套 `"authHome"` 机制，指向任意目录即可：该账号的登录存到 `<authHome>/claude-auth.json`（而不是配置目录里唯一的那份），`awerouter config login claude <dir>` 负责登录（各账号独立刷新）：
+
+```json
+"claude-work": { "base_url": "https://api.anthropic.com", "auth": "claude",
+                 "authHome": "~/.config/awerouter/accounts/claude-work", "pool": "claude-sub" }
+```
+
+不写 `authHome` 就是上面的单登录行为。按登录隔离的故障转移记账、启动警告、登出（`awerouter config logout claude <dir>`）均与 codex 一致。
 
 任何说 Anthropic 协议的客户端把 base URL 指到 awerouter、填个哑 key 即可（Claude Code 设 `ANTHROPIC_BASE_URL`，CLI 自己的登录完全不受影响）；鉴权头和 OAuth 标记由 awerouter 每请求现盖，请求体不做改写。行为要点：
 
@@ -708,7 +728,7 @@ awerouter self-update [--check]        # 升级到最新 PyPI 版本（--check�
 awerouter config path                 # 打印两个配置文件路径
 awerouter config show [PROFILE]       # 脱敏全量配置；带 PROFILE 只看它的 provider 和条目
 awerouter config edit [providers|routing]  # 在 $EDITOR 中打开某个文件（先备份 .bak）
-awerouter config login [claude|codex]      # 登录订阅账号（claude：浏览器 PKCE 授权）
+awerouter config login [claude|codex] [dir]  # 登录订阅账号（claude：浏览器 PKCE 授权）；dir = 该账号的 authHome
 awerouter config logout [claude|codex]     # 删除已保存的订阅登录
 awerouter config restore [providers|routing]  # 从 .bak 备份恢复配置文件
 awerouter usage stats

@@ -26,6 +26,13 @@ access tokens are short-lived (~hours) and refreshed here with a rotating
 refresh token, persisted in the config dir with 0600 perms. A threading lock
 plus a re-read-and-compare keeps concurrent in-flight requests from racing
 the refresh (the second one reuses the first one's tokens).
+
+Multiple accounts: a provider's optional "authHome" names the dir this
+account's store lives in (<authHome>/claude-auth.json instead of the config
+dir's single claude-auth.json), so several Claude subscriptions ride side by
+side as separate providers; `config login claude <dir>` fills one. Each store
+refreshes independently — one lock serializes them all, which is correct
+(they share no state) and rare enough never to matter.
 """
 
 from __future__ import annotations
@@ -74,9 +81,11 @@ class ClaudeAuthError(Exception):
     """No usable Claude login: store missing, rejected, or unreachable."""
 
 
-def claude_auth_path() -> Path:
-    # Mirrors config.config_dir (importing it would cycle: config imports this module).
-    base = os.environ.get("AWEROUTER_CONFIG_DIR", "~/.config/awerouter")
+def claude_auth_path(home: "str | None" = None) -> Path:
+    # An explicit home (a provider's authHome) relocates this account's store;
+    # default mirrors config.config_dir (importing it would cycle: config
+    # imports this module).
+    base = home or os.environ.get("AWEROUTER_CONFIG_DIR", "~/.config/awerouter")
     return Path(base).expanduser() / "claude-auth.json"
 
 
@@ -170,21 +179,21 @@ def _normalize_tokens(resp: dict, previous: dict | None = None) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def _read_store() -> dict:
-    path = claude_auth_path()
+def _read_store(home: "str | None" = None) -> dict:
+    path = claude_auth_path(home)
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
-        raise ClaudeAuthError(f"claude login not found: {path} — run: awerouter config login claude") from None
+        raise ClaudeAuthError(f"claude login not found: {path} — run: awerouter config login claude{f' {home}' if home else ''}") from None
     except (OSError, json.JSONDecodeError) as exc:
         raise ClaudeAuthError(f"cannot read claude login {path}: {exc}") from None
     if not isinstance(payload, dict) or not isinstance(payload.get("access_token"), str):
-        raise ClaudeAuthError(f"no access_token in {path} — run: awerouter config login claude")
+        raise ClaudeAuthError(f"no access_token in {path} — run: awerouter config login claude{f' {home}' if home else ''}")
     return payload
 
 
-def _write_store(payload: dict) -> None:
-    path = claude_auth_path()
+def _write_store(payload: dict, home: "str | None" = None) -> None:
+    path = claude_auth_path(home)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
     tmp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
@@ -212,7 +221,7 @@ def _refresh(payload: dict) -> dict:
     return _normalize_tokens(resp, payload)
 
 
-def load_claude_login(force: bool = False) -> str:
+def load_claude_login(force: bool = False, home: "str | None" = None) -> str:
     """A valid access token, refreshing first when stale (or forced).
 
     Thread-safe: under the lock the store is re-read, so a concurrent refresh
@@ -220,28 +229,28 @@ def load_claude_login(force: bool = False) -> str:
     another awerouter process rotated the token underneath us recovers the
     same way (file changed -> fresh token wins).
     """
-    payload = _read_store()
+    payload = _read_store(home)
     if not force and _fresh(payload):
         return payload["access_token"]
     with _refresh_lock:
-        payload = _read_store()
+        payload = _read_store(home)
         if not force and _fresh(payload):
             return payload["access_token"]
         seen_refresh = payload.get("refresh_token")
         try:
             payload = _refresh(payload)
         except ClaudeAuthError:
-            current = _read_store()
+            current = _read_store(home)
             if current.get("refresh_token") != seen_refresh and _fresh(current):
                 return current["access_token"]  # another process refreshed; ride it
             raise
-        _write_store(payload)
+        _write_store(payload, home)
         return payload["access_token"]
 
 
-def apply_claude_auth(headers: dict, force: bool = False) -> None:
+def apply_claude_auth(headers: dict, home: "str | None" = None, force: bool = False) -> None:
     """Write the full claude auth header set from the owned login."""
-    headers["authorization"] = f"Bearer {load_claude_login(force)}"
+    headers["authorization"] = f"Bearer {load_claude_login(force, home)}"
     flags = [f.strip() for f in headers.get("anthropic-beta", "").split(",") if f.strip()]
     if OAUTH_BETA not in flags:
         flags.append(OAUTH_BETA)
@@ -254,7 +263,7 @@ def apply_claude_auth(headers: dict, force: bool = False) -> None:
 # ---------------------------------------------------------------------------
 
 
-def complete_login(code: str, verifier: str, state: str) -> dict:
+def complete_login(code: str, verifier: str, state: str, home: "str | None" = None) -> dict:
     """Exchange the pasted authorization code; returns the stored payload."""
     resp = _token_request({
         "grant_type": "authorization_code",
@@ -265,26 +274,26 @@ def complete_login(code: str, verifier: str, state: str) -> dict:
         "code_verifier": verifier,
     })
     payload = _normalize_tokens(resp)
-    _write_store(payload)
+    _write_store(payload, home)
     return payload
 
 
-def login_status() -> "dict | None":
+def login_status(home: "str | None" = None) -> "dict | None":
     """Stored login summary for display, or None when logged out."""
     try:
-        payload = _read_store()
+        payload = _read_store(home)
     except ClaudeAuthError:
         return None
     return {
-        "path": str(claude_auth_path()),
+        "path": str(claude_auth_path(home)),
         "expires_at": payload.get("expires_at"),
         "fresh": _fresh(payload),
     }
 
 
-def logout() -> "Path | None":
+def logout(home: "str | None" = None) -> "Path | None":
     """Delete the stored login. Returns the removed path, or None if absent."""
-    path = claude_auth_path()
+    path = claude_auth_path(home)
     if not path.exists():
         return None
     path.unlink()

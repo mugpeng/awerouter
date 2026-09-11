@@ -211,6 +211,20 @@ def load_providers(path: Optional[Path] = None) -> dict[str, dict[str, Provider]
                 )
             if not base_url:
                 die(f"provider '{protocol}.{name}' missing base_url")
+            auth_home_raw = entry.get("authHome")
+            if auth_home_raw is None:
+                auth_home = ""
+            elif isinstance(auth_home_raw, str) and auth_home_raw.strip():
+                auth_home = str(Path(auth_home_raw.strip()).expanduser())
+            else:
+                die(f"provider '{protocol}.{name}' 'authHome' must be a non-empty path "
+                    f"string (the dir this account's login lives in), got: {auth_home_raw!r}")
+            if auth_home and auth not in (AUTH_SENTINEL, CLAUDE_SENTINEL):
+                die(
+                    f"provider '{protocol}.{name}': authHome belongs to subscription "
+                    f"logins — set 'auth' to '{AUTH_SENTINEL}' or '{CLAUDE_SENTINEL}' "
+                    "first (key-based providers authenticate with auth alone)"
+                )
             auth_header = entry.get("auth_header") or detect_auth_header(base_url)
             models = _parse_provider_models(protocol, name, entry.get("models"))
             multimodal_raw = entry.get("multimodal", False)
@@ -229,6 +243,7 @@ def load_providers(path: Optional[Path] = None) -> dict[str, dict[str, Provider]
             group_providers[name] = Provider(
                 name=name, base_url=base_url, auth=auth, auth_header=auth_header,
                 models=models, multimodal=multimodal_raw, pool=pool,
+                auth_home=auth_home,
             )
         result[protocol] = group_providers
     return result
@@ -838,6 +853,8 @@ def format_providers_display(all_providers: dict[str, dict[str, Provider]]) -> s
             entry = {"base_url": p.base_url, "auth_header": p.auth_header}
             if p.pool:
                 entry["pool"] = p.pool
+            if p.auth_home:
+                entry["authHome"] = p.auth_home
             if p.multimodal:
                 entry["multimodal"] = True
             if not p.auth:
@@ -1099,17 +1116,29 @@ def config_edit_cmd(file):
 @config.command("login")
 @click.argument("account", default="claude",
                 type=click.Choice(["claude", "codex"], case_sensitive=False))
-def config_login_cmd(account):
-    """Log in a subscription account used by an 'auth' sentinel provider."""
+@click.argument("home", required=False)
+def config_login_cmd(account, home):
+    """Log in a subscription account used by an 'auth' sentinel provider.
+
+    HOME is the account's authHome dir (providers.json) — log in several
+    accounts of one provider by giving each its own dir. Absent = the default
+    single-login location.
+    """
     account = account.lower()
+    home = str(Path(home).expanduser()) if home else None
     if account == "codex":
         # The codex CLI owns its login (and its single-use refresh tokens);
         # awerouter only reads auth.json, so the login happens in the CLI.
-        click.echo("codex logins live in the codex CLI — run: codex login")
-        click.echo("awerouter picks the result up from $CODEX_HOME/auth.json automatically.")
+        if home:
+            click.echo(f"codex logins live in the codex CLI — run: CODEX_HOME={home} codex login")
+            click.echo("(an aweswitch account dir works as-is: aweswitch account login codex <name>)")
+            click.echo(f"awerouter picks the result up from {home}/auth.json automatically.")
+        else:
+            click.echo("codex logins live in the codex CLI — run: codex login")
+            click.echo("awerouter picks the result up from $CODEX_HOME/auth.json automatically.")
         return
     from awerouter import claude
-    if claude.login_status() is not None:
+    if claude.login_status(home) is not None:
         click.echo("an existing claude login will be replaced (its tokens become useless).")
         if not click.confirm("Continue?"):
             click.echo("aborted")
@@ -1124,28 +1153,33 @@ def config_login_cmd(account):
     webbrowser.open(url)
     code = click.prompt("After authorizing, paste the code shown on the callback page")
     try:
-        payload = claude.complete_login(code.strip(), verifier, state)
+        payload = claude.complete_login(code.strip(), verifier, state, home)
     except claude.ClaudeAuthError as exc:
         raise SystemExit(f"awerouter: login failed: {exc}")
     from datetime import datetime, timezone
     expires = datetime.fromtimestamp(payload["expires_at"], tz=timezone.utc)
-    click.echo(f"claude login saved: {claude.claude_auth_path()}")
+    click.echo(f"claude login saved: {claude.claude_auth_path(home)}")
     click.echo(f"  access token valid until {expires:%Y-%m-%d %H:%M} UTC (refreshed automatically)")
 
 
 @config.command("logout")
 @click.argument("account", default="claude",
                 type=click.Choice(["claude", "codex"], case_sensitive=False))
-def config_logout_cmd(account):
-    """Remove a stored subscription login."""
+@click.argument("home", required=False)
+def config_logout_cmd(account, home):
+    """Remove a stored subscription login (HOME = its authHome dir)."""
     account = account.lower()
+    home = str(Path(home).expanduser()) if home else None
     if account == "codex":
-        click.echo("codex logins live in the codex CLI — run: codex logout")
+        if home:
+            click.echo(f"codex logins live in the codex CLI — run: CODEX_HOME={home} codex logout")
+        else:
+            click.echo("codex logins live in the codex CLI — run: codex logout")
         return
     from awerouter import claude
-    removed = claude.logout()
+    removed = claude.logout(home)
     if removed is None:
-        click.echo(f"no claude login found ({claude.claude_auth_path()})")
+        click.echo(f"no claude login found ({claude.claude_auth_path(home)})")
         return
     click.echo(f"removed {removed}")
 

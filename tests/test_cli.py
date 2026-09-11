@@ -978,7 +978,7 @@ class TestLoginLogout:
                             lambda: ("https://platform.claude.com/oauth/authorize?x=1", "ver", "st"))
         monkeypatch.setattr("webbrowser.open", lambda url: True)
         monkeypatch.setattr(claude, "complete_login",
-                            lambda code, verifier, state: {
+                            lambda code, verifier, state, home=None: {
                                 "access_token": "at", "refresh_token": "rt",
                                 "expires_at": 4102444800.0, "scopes": "user:inference"})
         r = CliRunner().invoke(cli, ["config", "login", "claude"], input="the-code\n")
@@ -986,11 +986,33 @@ class TestLoginLogout:
         assert "authorize" in r.output          # the URL is shown for manual open
         assert "claude login saved" in r.output
 
+    def test_login_claude_with_authhome_saves_into_that_dir(self, tmp_path, monkeypatch):
+        from awerouter import claude
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path / "cfg"))
+        home = tmp_path / "accounts" / "claude-work"
+        monkeypatch.setattr(claude, "begin_login", lambda: ("https://x", "ver", "st"))
+        monkeypatch.setattr("webbrowser.open", lambda url: True)
+        seen = {}
+
+        def fake_complete(code, verifier, state, home=None):
+            seen["home"] = home
+            claude._write_store({"access_token": "at", "refresh_token": "rt",
+                                 "expires_at": 4102444800.0}, home)
+            return {"expires_at": 4102444800.0}
+
+        monkeypatch.setattr(claude, "complete_login", fake_complete)
+        r = CliRunner().invoke(cli, ["config", "login", "claude", str(home)], input="c\n")
+        assert r.exit_code == 0, r.output
+        assert seen["home"] == str(home)
+        assert (home / "claude-auth.json").exists()
+        assert not (tmp_path / "cfg" / "claude-auth.json").exists()
+        assert str(home / "claude-auth.json") in r.output
+
     def test_login_failure_exits_with_message(self, tmp_path, monkeypatch):
         from awerouter import claude
         monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
 
-        def rejected(code, verifier, state):
+        def rejected(code, verifier, state, home=None):
             raise claude.ClaudeAuthError("invalid authorization code")
 
         monkeypatch.setattr(claude, "begin_login", lambda: ("u", "v", "s"))
@@ -1014,6 +1036,14 @@ class TestLoginLogout:
         assert r.exit_code == 0
         assert "codex login" in r.output
 
+    def test_login_codex_with_authhome_names_the_dir(self, tmp_path, monkeypatch):
+        _setup(tmp_path, monkeypatch)
+        r = CliRunner().invoke(cli, ["config", "login", "codex",
+                                     "~/.config/aweswitch/accounts/codex/cxo-heck"])
+        assert r.exit_code == 0, r.output
+        assert "CODEX_HOME=" in r.output
+        assert "auth.json" in r.output
+
     def test_logout_claude_removes_store(self, tmp_path, monkeypatch):
         monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
         (tmp_path / "claude-auth.json").write_text("{}", encoding="utf-8")
@@ -1021,6 +1051,16 @@ class TestLoginLogout:
         assert r.exit_code == 0
         assert "removed" in r.output
         assert not (tmp_path / "claude-auth.json").exists()
+
+    def test_logout_claude_with_authhome_removes_that_store(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path / "cfg"))
+        home = tmp_path / "accounts" / "claude-work"
+        home.mkdir(parents=True)
+        (home / "claude-auth.json").write_text("{}", encoding="utf-8")
+        r = CliRunner().invoke(cli, ["config", "logout", "claude", str(home)])
+        assert r.exit_code == 0, r.output
+        assert "removed" in r.output
+        assert not (home / "claude-auth.json").exists()
 
     def test_logout_claude_without_store(self, tmp_path, monkeypatch):
         monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))

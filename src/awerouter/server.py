@@ -138,10 +138,11 @@ async def _set_auth(headers: dict, provider, env: dict | None = None,
     if not provider.auth:
         return
     if provider.auth == AUTH_SENTINEL:
-        apply_codex_auth(headers)
+        apply_codex_auth(headers, provider.auth_home or None)
         return
     if provider.auth == CLAUDE_SENTINEL:
-        await asyncio.to_thread(apply_claude_auth, headers, force_claude_refresh)
+        await asyncio.to_thread(apply_claude_auth, headers, provider.auth_home or None,
+                                force_claude_refresh)
         return
     auth_value = expand_value(provider.auth, env)
     if provider.auth_header == "authorization" and not auth_value.lower().startswith("bearer "):
@@ -877,26 +878,28 @@ async def _proxy_flow(request: web.Request, endpoint_protocol: str) -> web.Strea
         # destination once before surfacing the 401 to the client. A
         # claude-account 401 gets the same one-shot retry with a forced token
         # refresh (stale clock, token rotated by another process).
-        auth = providers[dest.provider_name].auth
-        if status == 401 and not state.codex_retried and auth in (AUTH_SENTINEL, CLAUDE_SENTINEL):
+        provider = providers[dest.provider_name]
+        if (status == 401 and not state.codex_retried
+                and provider.auth in (AUTH_SENTINEL, CLAUDE_SENTINEL)):
             up.close()
             state.codex_retried = True
-            state.claude_force_refresh = auth == CLAUDE_SENTINEL
+            state.claude_force_refresh = provider.auth == CLAUDE_SENTINEL
             continue
 
         # Second 401: the login itself is rejected (dead account token, not a
         # mid-flight refresh). Only a candidate riding different credentials
         # can save the request — the rescue remembers the rejected login for
-        # every later hop (hard, unlike cooldown) — and prints one line per
-        # failover, so a dead login is loud instead of silently burning
-        # another destination.
-        if status == 401 and auth in (AUTH_SENTINEL, CLAUDE_SENTINEL):
-            state.rejected_auths.add(auth)
+        # every later hop (hard, unlike cooldown; keyed on sentinel+authHome,
+        # so one dead account never condemns its healthy sibling) — and prints
+        # one line per failover, so a dead login is loud instead of silently
+        # burning another destination.
+        if status == 401 and provider.auth in (AUTH_SENTINEL, CLAUDE_SENTINEL):
+            state.rejected_auths.add(provider.auth_key)
             if _next_fallback(state, providers):
                 up.close()
                 nxt = state.queue[state.queue_pos].dest
-                print(f"  {auth} 401 -> login rejected after retry; {request_id} fails over to "
-                      f"{nxt.provider_name},{nxt.model}")
+                print(f"  {provider.auth_key} 401 -> login rejected after retry; "
+                      f"{request_id} fails over to {nxt.provider_name},{nxt.model}")
                 continue
 
         # A codex 200 for a non-streaming client: the upstream ran SSE (the
@@ -1028,7 +1031,7 @@ def _next_fallback(state: _RoutingState, providers: dict) -> bool:
     pick = None
     for pos in range(state.queue_pos + 1, len(state.queue)):
         cand = state.queue[pos]
-        if providers[cand.dest.provider_name].auth in state.rejected_auths:
+        if providers[cand.dest.provider_name].auth_key in state.rejected_auths:
             continue
         if pick is None:
             pick = pos  # first candidate the auth filter allows (advisory floor)
@@ -1467,22 +1470,29 @@ def _pool_models_warning(groups: dict) -> "str | None":
     return "\n".join(lines) if lines else None
 
 
+def _by_auth_home(providers: dict, sentinel: str) -> dict:
+    """Sentinel providers grouped by their login dir: {authHome: [names]}.
+    Providers sharing a login (same authHome) share a verdict; separate
+    accounts on one sentinel get one each."""
+    grouped: dict[str, list[str]] = {}
+    for p in providers.values():
+        if p.auth == sentinel:
+            grouped.setdefault(p.auth_home, []).append(p.name)
+    return grouped
+
+
 def _codex_login_warning(providers: dict) -> "str | None":
-    """Warn when configured Codex providers cannot load the local login."""
-    offenders = sorted(
-        p.name for p in providers.values()
-        if p.auth == AUTH_SENTINEL
-    )
-    if not offenders:
-        return None
-    try:
-        load_codex_login()
-    except CodexAuthError as exc:
-        return (
-            "warning: invalid codex login for providers: " + ", ".join(offenders) + "\n"
-            f"  ({exc})"
-        )
-    return None
+    """Warn when configured Codex providers cannot load their login."""
+    lines = []
+    for home, names in sorted(_by_auth_home(providers, AUTH_SENTINEL).items()):
+        try:
+            load_codex_login(home or None)
+        except CodexAuthError as exc:
+            lines.append(
+                "warning: invalid codex login for providers: " + ", ".join(sorted(names)) + "\n"
+                f"  ({exc})"
+            )
+    return "\n".join(lines) if lines else None
 
 
 def _claude_login_warning(providers: dict) -> "str | None":
@@ -1490,23 +1500,24 @@ def _claude_login_warning(providers: dict) -> "str | None":
     them 503s with an 'awerouter config login claude' hint until the login
     exists. Store check only: a present-but-stale token is fine (it refreshes
     on the first request), so this never touches the network."""
-    offenders = sorted(
-        p.name for p in providers.values()
-        if p.auth == CLAUDE_SENTINEL
-    )
-    if not offenders:
-        return None
-    if claude_auth_path().exists():
-        if login_status() is not None:
-            return None
-        return (
-            "warning: invalid claude login for providers: " + ", ".join(offenders) + "\n"
-            f"  ({claude_auth_path()} — re-run: awerouter config login claude)"
-        )
-    return (
-        "warning: no claude login for providers: " + ", ".join(offenders) + "\n"
-        f"  ({claude_auth_path()} — run: awerouter config login claude)"
-    )
+    lines = []
+    for home, names in sorted(_by_auth_home(providers, CLAUDE_SENTINEL).items()):
+        login_home = home or None
+        hint = f"awerouter config login claude{f' {home}' if home else ''}"
+        path = claude_auth_path(login_home)
+        if path.exists():
+            if login_status(login_home) is not None:
+                continue
+            lines.append(
+                "warning: invalid claude login for providers: " + ", ".join(sorted(names)) + "\n"
+                f"  ({path} — re-run: {hint})"
+            )
+        else:
+            lines.append(
+                "warning: no claude login for providers: " + ", ".join(sorted(names)) + "\n"
+                f"  ({path} — run: {hint})"
+            )
+    return "\n".join(lines) if lines else None
 
 
 async def _bind_site(runner, host: str, port: int, port_explicit: bool) -> int:

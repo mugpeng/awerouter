@@ -1,6 +1,7 @@
 """Tests for awerouter.config."""
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -240,6 +241,95 @@ class TestLoadProviders:
         }}, {})
         with pytest.raises(SystemExit, match="anthropic"):
             load_providers()
+
+
+class TestAuthHome:
+    """authHome names the dir a sentinel provider's login lives in — the
+    multi-account mechanism (several codex/claude logins side by side)."""
+
+    def test_codex_authhome_expanded_and_loaded(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+        _write_config(tmp_path, {"openai-responses": {
+            "cxo-heck": {"base_url": "https://chatgpt.com/backend-api/codex",
+                         "auth": "codex", "authHome": "~/accounts/heck"},
+        }}, {})
+        p = load_providers()["openai-responses"]["cxo-heck"]
+        assert p.auth_home == str(Path.home() / "accounts" / "heck")
+        assert p.auth_key == f"codex:{Path.home() / 'accounts' / 'heck'}"
+
+    def test_claude_authhome_loaded(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+        home = str(tmp_path / "claude-work")
+        _write_config(tmp_path, {"anthropic": {
+            "claude-work": {"base_url": "https://api.anthropic.com",
+                            "auth": "claude", "authHome": home},
+        }}, {})
+        p = load_providers()["anthropic"]["claude-work"]
+        assert p.auth_home == home
+
+    def test_two_codex_accounts_differ_in_auth_key(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+        _write_config(tmp_path, {"openai-responses": {
+            "codex-peng": {"base_url": "https://chatgpt.com/backend-api/codex",
+                           "auth": "codex", "authHome": str(tmp_path / "peng")},
+            "codex-heck": {"base_url": "https://chatgpt.com/backend-api/codex",
+                           "auth": "codex", "authHome": str(tmp_path / "heck")},
+        }}, {})
+        group = load_providers()["openai-responses"]
+        assert group["codex-peng"].auth_key != group["codex-heck"].auth_key
+
+    def test_authhome_without_sentinel_auth_dies(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+        _write_config(tmp_path, {"anthropic": {
+            "p": {"base_url": "https://x", "auth": "${K}", "authHome": "/tmp/somewhere"},
+        }}, {})
+        with pytest.raises(SystemExit, match="authHome belongs to subscription logins"):
+            load_providers()
+
+    def test_authhome_without_any_auth_dies(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+        _write_config(tmp_path, {"anthropic": {
+            "p": {"base_url": "http://127.0.0.1:11434", "authHome": "/tmp/somewhere"},
+        }}, {})
+        with pytest.raises(SystemExit, match="authHome belongs to subscription logins"):
+            load_providers()
+
+    @pytest.mark.parametrize("bad", ["", "   "])
+    def test_empty_authhome_dies(self, tmp_path, monkeypatch, bad):
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+        _write_config(tmp_path, {"openai-responses": {
+            "codex": {"base_url": "https://chatgpt.com/backend-api/codex",
+                      "auth": "codex", "authHome": bad},
+        }}, {})
+        with pytest.raises(SystemExit, match="non-empty path"):
+            load_providers()
+
+    def test_non_string_authhome_dies(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+        _write_config(tmp_path, {"openai-responses": {
+            "codex": {"base_url": "https://chatgpt.com/backend-api/codex",
+                      "auth": "codex", "authHome": 42},
+        }}, {})
+        with pytest.raises(SystemExit, match="non-empty path"):
+            load_providers()
+
+    def test_absent_authhome_is_empty_string(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AWEROUTER_CONFIG_DIR", str(tmp_path))
+        _write_config(tmp_path, {"openai-responses": {
+            "codex": {"base_url": "https://chatgpt.com/backend-api/codex", "auth": "codex"},
+        }}, {})
+        p = load_providers()["openai-responses"]["codex"]
+        assert p.auth_home == ""
+        assert p.auth_key == "codex"
+
+    def test_display_shows_authhome(self):
+        p = Provider("cxo-heck", "https://chatgpt.com/backend-api/codex", "codex",
+                     auth_home="/accounts/heck")
+        out = format_providers_display({"openai-responses": {"cxo-heck": p}})
+        assert '"authHome": "/accounts/heck"' in out
+        plain = Provider("codex", "https://chatgpt.com/backend-api/codex", "codex")
+        assert "authHome" not in format_providers_display(
+            {"openai-responses": {"codex": plain}})
 
     def test_models_list_parsed(self, tmp_path, monkeypatch):
         """A provider may declare the models it can directly serve."""
